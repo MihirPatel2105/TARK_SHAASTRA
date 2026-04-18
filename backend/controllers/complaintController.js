@@ -16,6 +16,64 @@ const GRIEVANCE_DEPARTMENT_MAP = {
 
 const OFFICER_TRACKED_STATUSES = ['PENDING', 'IN_PROGRESS', 'RESOLVED'];
 const GPS_MATCH_THRESHOLD_METERS = 100;
+const COMPLAINT_SOURCE_ENUM = ['APP_IMAGE', 'APP_TEXT', 'IVR_CALL'];
+
+function normalizeSource(value, fallback = 'APP_TEXT') {
+  const raw = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  return COMPLAINT_SOURCE_ENUM.includes(raw) ? raw : fallback;
+}
+
+function inferDepartmentFromText(text) {
+  if (!text || typeof text !== 'string') {
+    return null;
+  }
+
+  const normalized = text.toLowerCase();
+
+  if (/pothole|road|street|asphalt|traffic/.test(normalized)) {
+    return 'Roads';
+  }
+
+  if (/water|leak|pipeline|drain|sewer/.test(normalized)) {
+    return 'Water';
+  }
+
+  if (/electric|power|transformer|line|current/.test(normalized)) {
+    return 'Electricity';
+  }
+
+  if (/garbage|waste|sanitation|trash|clean/.test(normalized)) {
+    return 'Sanitation';
+  }
+
+  return null;
+}
+
+function inferGrievanceTypeFromText(text) {
+  if (!text || typeof text !== 'string') {
+    return null;
+  }
+
+  const normalized = text.toLowerCase();
+
+  if (/pothole|road|street|asphalt/.test(normalized)) {
+    return 'Pothole';
+  }
+
+  if (/leak|pipeline|water|sewer|drain/.test(normalized)) {
+    return 'Leakage';
+  }
+
+  if (/power|electric|transformer|line/.test(normalized)) {
+    return 'Power Cut';
+  }
+
+  if (/garbage|waste|trash|sanitation/.test(normalized)) {
+    return 'Garbage';
+  }
+
+  return 'General';
+}
 
 function parseNumber(value, fallback = null) {
   if (value === undefined || value === null || value === '') {
@@ -130,28 +188,40 @@ const createComplaint = asyncHandler(async (req, res) => {
     lng,
     created_by,
     assign_officer_id,
-    force_create
+    force_create,
+    source: sourceInput,
+    location_text
   } = req.body;
 
-  if (!grievance_id || !title || !description || !grievance_type) {
+  if (!grievance_id || !grievance_type) {
     res.status(400);
-    throw new Error('grievance_id, title, description, and grievance_type are required');
+    throw new Error('grievance_id and grievance_type are required');
   }
 
-  const fallbackDepartment = resolveDepartment(departmentInput, grievance_type);
+  const source = normalizeSource(sourceInput, req.file ? 'APP_IMAGE' : 'APP_TEXT');
+
+  if (!req.file && (!description || !String(description).trim())) {
+    res.status(400);
+    throw new Error('Either image or description is required to create a complaint');
+  }
+
+  const complaintDescription = typeof description === 'string' && description.trim().length
+    ? description.trim()
+    : 'Complaint created without description';
+
+  const complaintTitle = typeof title === 'string' && title.trim().length
+    ? title.trim()
+    : `${grievance_type} complaint`;
+
+  const fallbackDepartment =
+    resolveDepartment(departmentInput, grievance_type) ||
+    inferDepartmentFromText(complaintDescription);
 
   const location = buildPointFromBody(req.body);
-  if (!location) {
-    res.status(400);
-    throw new Error('lat and lng are required');
-  }
+  const hasLocation = Boolean(location);
+  const locationStatus = hasLocation ? 'AVAILABLE' : 'MISSING';
 
-  if (!req.file) {
-    res.status(400);
-    throw new Error('Complaint image is required');
-  }
-
-  const exifGps = extractImageGps(req.file.buffer);
+  const exifGps = req.file ? extractImageGps(req.file.buffer) : { found: false };
   const userLocation = location;
 
   // Many mobile/compressed uploads strip EXIF GPS metadata.
@@ -175,25 +245,30 @@ const createComplaint = asyncHandler(async (req, res) => {
     throw new Error('Complaint with this grievance_id already exists');
   }
 
-  const nearbyComplaints = await getNearbyComplaintsByLocation(location, 500, grievance_type);
-  if (nearbyComplaints.length > 0 && !['true', true, 1, '1'].includes(force_create)) {
-    return res.status(409).json({
-      message: 'A similar complaint already exists nearby. Vote on the existing complaint instead.',
-      duplicate_suggestions: nearbyComplaints.map(serializeComplaint)
-    });
+  if (hasLocation) {
+    const nearbyComplaints = await getNearbyComplaintsByLocation(location, 500, grievance_type);
+    if (nearbyComplaints.length > 0 && !['true', true, 1, '1'].includes(force_create)) {
+      return res.status(409).json({
+        message: 'A similar complaint already exists nearby. Vote on the existing complaint instead.',
+        duplicate_suggestions: nearbyComplaints.map(serializeComplaint)
+      });
+    }
   }
 
   let imageUrl;
   let imagePublicId;
 
-  const uploadResult = await uploadBufferToCloudinary(req.file.buffer, {
-    folder: 'complaints'
-  });
+  let classification = null;
+  if (req.file) {
+    const uploadResult = await uploadBufferToCloudinary(req.file.buffer, {
+      folder: 'complaints'
+    });
 
-  imageUrl = uploadResult.secure_url;
-  imagePublicId = uploadResult.public_id;
+    imageUrl = uploadResult.secure_url;
+    imagePublicId = uploadResult.public_id;
+    classification = await classifyImageByAllModels(imageUrl);
+  }
 
-  const classification = await classifyImageByAllModels(imageUrl);
   const aiDepartment = classification?.best?.decision === 'AUTO_ASSIGNED'
     ? classification.best.department
     : null;
@@ -205,18 +280,21 @@ const createComplaint = asyncHandler(async (req, res) => {
     throw new Error('department could not be resolved from AI classification or grievance mapping');
   }
 
-  const fallbackOfficer = mongoose.Types.ObjectId.isValid(assign_officer_id)
+  const fallbackOfficer = mongoose.Types.ObjectId.isValid(assign_officer_id) || !hasLocation
     ? null
     : await findOfficerForDepartment(location, department);
 
   const complaint = await Complaint.create({
     grievance_id,
-    title,
-    description,
+    title: complaintTitle,
+    description: complaintDescription,
     department,
     district: typeof district === 'string' && district.trim().length ? district.trim() : null,
     grievance_type,
-    location,
+    source,
+    location_status: locationStatus,
+    location_text: typeof location_text === 'string' && location_text.trim().length ? location_text.trim() : null,
+    location: hasLocation ? location : undefined,
     user_location: userLocation,
     image_location: imageLocation,
     image_url: imageUrl,
@@ -228,7 +306,13 @@ const createComplaint = asyncHandler(async (req, res) => {
       department_from_ai: classification?.best?.department || null,
       decision: classification?.best?.decision || 'FAILED',
       min_confidence_threshold: classification?.threshold ?? null,
-      model_results: classification?.models || []
+      model_results: classification?.models || [],
+      detected_location_text: null,
+      extracted_coordinates: hasLocation ? location.coordinates : undefined,
+      summary: complaintDescription.slice(0, 240)
+    },
+    ivr_metadata: {
+      followup_status: hasLocation ? 'NOT_REQUIRED' : 'PENDING'
     },
     status: 'PENDING',
     created_by: mongoose.Types.ObjectId.isValid(created_by) ? created_by : undefined,
@@ -241,7 +325,7 @@ const createComplaint = asyncHandler(async (req, res) => {
     verification_status: 'PENDING',
     reopen_flag: 0,
     gps_match_flag: gpsMatchFlag,
-    photo_uploaded: 1,
+    photo_uploaded: req.file ? 1 : 0,
     ivr_response: 0
   });
 
@@ -297,6 +381,125 @@ const getNearbyComplaints = asyncHandler(async (req, res) => {
     count: complaints.length,
     radius,
     complaints: complaints.map(serializeComplaint)
+  });
+});
+
+const createIvrComplaint = asyncHandler(async (req, res) => {
+  const {
+    grievance_id,
+    title,
+    description,
+    transcript_text,
+    citizen_phone,
+    department: departmentInput,
+    grievance_type,
+    call_sid,
+    recording_url,
+    location_text
+  } = req.body;
+
+  if (!citizen_phone || !String(citizen_phone).trim()) {
+    res.status(400);
+    throw new Error('citizen_phone is required for IVR complaint registration');
+  }
+
+  const narrative = [description, transcript_text].filter(Boolean).join(' ').trim();
+  if (!narrative) {
+    res.status(400);
+    throw new Error('description or transcript_text is required for IVR complaint');
+  }
+
+  const resolvedGrievanceType = grievance_type || inferGrievanceTypeFromText(narrative);
+  const resolvedDepartment =
+    resolveDepartment(departmentInput, resolvedGrievanceType) ||
+    inferDepartmentFromText(narrative) ||
+    'General';
+
+  const location = buildPointFromBody(req.body);
+  const hasLocation = Boolean(location);
+
+  const complaint = await Complaint.create({
+    grievance_id: grievance_id || `IVR-${Date.now()}`,
+    title: typeof title === 'string' && title.trim().length ? title.trim() : `IVR complaint - ${resolvedDepartment}`,
+    description: narrative,
+    grievance_type: resolvedGrievanceType,
+    source: 'IVR_CALL',
+    department: resolvedDepartment,
+    location: hasLocation ? location : undefined,
+    location_status: hasLocation ? 'AVAILABLE' : 'NEEDS_IVR_FOLLOWUP',
+    location_text: typeof location_text === 'string' && location_text.trim().length ? location_text.trim() : null,
+    citizen_phone: citizen_phone.trim(),
+    ai_classification: {
+      department_from_ai: resolvedDepartment,
+      decision: 'AUTO_ASSIGNED',
+      summary: narrative.slice(0, 240),
+      detected_location_text: typeof location_text === 'string' ? location_text.trim() : null,
+      extracted_coordinates: hasLocation ? location.coordinates : undefined
+    },
+    ivr_metadata: {
+      call_sid: call_sid || null,
+      recording_url: recording_url || null,
+      transcript_text: transcript_text || null,
+      followup_status: hasLocation ? 'NOT_REQUIRED' : 'PENDING'
+    },
+    status: 'PENDING',
+    verification_status: 'PENDING',
+    reopen_flag: 0,
+    gps_match_flag: 0,
+    photo_uploaded: 0,
+    ivr_response: 0
+  });
+
+  res.status(201).json({
+    message: 'IVR complaint registered successfully',
+    complaint: serializeComplaint(complaint.toObject())
+  });
+});
+
+const getNeedsLocationComplaints = asyncHandler(async (req, res) => {
+  const query = {
+    location_status: { $in: ['MISSING', 'NEEDS_IVR_FOLLOWUP'] }
+  };
+
+  if (req.query.source) {
+    query.source = normalizeSource(req.query.source, req.query.source);
+  }
+
+  if (req.query.department) {
+    query.department = req.query.department;
+  }
+
+  const complaints = await Complaint.find(query)
+    .sort({ created_at: -1 })
+    .lean();
+
+  res.json({
+    count: complaints.length,
+    complaints: complaints.map(serializeComplaint)
+  });
+});
+
+const triggerLocationFollowupIvr = asyncHandler(async (req, res) => {
+  const complaint = await Complaint.findById(req.params.id);
+
+  if (!complaint) {
+    res.status(404);
+    throw new Error('Complaint not found');
+  }
+
+  complaint.location_status = 'NEEDS_IVR_FOLLOWUP';
+  complaint.ivr_metadata = {
+    ...complaint.ivr_metadata,
+    followup_status: 'TRIGGERED',
+    followup_call_sid: req.body.followup_call_sid || complaint.ivr_metadata?.followup_call_sid || null,
+    followup_triggered_at: new Date()
+  };
+
+  await complaint.save();
+
+  res.json({
+    message: 'IVR follow-up for location marked as triggered',
+    complaint: serializeComplaint(complaint.toObject())
   });
 });
 
@@ -492,6 +695,11 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
   }
 
   const complaintPoint = complaint.location;
+  if (!complaintPoint || !Array.isArray(complaintPoint.coordinates) || complaintPoint.coordinates.length !== 2) {
+    res.status(400);
+    throw new Error('Complaint location is missing. Resolve location first before officer resolution.');
+  }
+
   const officerPoint = buildPointFromLatLng(officerLat, officerLng);
   const resolvedImageLocation = buildPointFromLatLng(exifGps.latitude, exifGps.longitude);
 
@@ -609,7 +817,10 @@ const registerUser = asyncHandler(async (req, res) => {
 
 module.exports = {
   createComplaint,
+  createIvrComplaint,
   getNearbyComplaints,
+  getNeedsLocationComplaints,
+  triggerLocationFollowupIvr,
   getComplaintById,
   voteOnComplaint,
   resolveComplaint,

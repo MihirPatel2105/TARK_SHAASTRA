@@ -1,4 +1,4 @@
-import { FileCheck2, ListChecks, MapPinned, PlusCircle, LayoutDashboard, ShieldCheck, ClipboardList, BarChart3, UploadCloud, UserCog, UserCircle2 } from "lucide-react";
+import { FileCheck2, ListChecks, MapPinned, PlusCircle, LayoutDashboard, ShieldCheck, ClipboardList, BarChart3, UploadCloud, UserCog, UserCircle2, LocateFixed } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 const linksByRole = {
@@ -15,6 +15,7 @@ const linksByRole = {
     { to: "/officer/profile", label: "Profile", icon: UserCircle2 },
     { to: "/officer/map", label: "Complaints Map", icon: MapPinned },
     { to: "/officer/assigned", label: "Assigned Complaints", icon: ClipboardList },
+    { to: "/officer/needs-location", label: "Needs Location / IVR", icon: LocateFixed },
     { to: "/officer/proof", label: "Upload Proof", icon: UploadCloud },
     { to: "/officer/verifications", label: "Pending Verifications", icon: ShieldCheck }
   ],

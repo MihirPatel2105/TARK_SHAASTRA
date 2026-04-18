@@ -15,6 +15,7 @@ import ResolvedComplaintsPage from "./pages/citizen/ResolvedComplaintsPage";
 import ComplaintDetailsPage from "./pages/citizen/ComplaintDetailsPage";
 import OfficerDashboardPage from "./dashboards/Officer/OfficerDashboard";
 import OfficerAssignedComplaintsPage from "./pages/officer/OfficerAssignedComplaintsPage";
+import OfficerNeedsLocationPage from "./pages/officer/OfficerNeedsLocationPage";
 import OfficerProofUploadPage from "./pages/officer/OfficerProofUploadPage";
 import OfficerPendingVerificationsPage from "./pages/officer/OfficerPendingVerificationsPage";
 import OfficerProfilePage from "./pages/officer/ProfilePage";
@@ -152,6 +153,7 @@ function App() {
           <Route path="profile" element={<OfficerProfilePage />} />
           <Route path="map" element={<MapPage workspaceLabel="Officer Workspace" />} />
           <Route path="assigned" element={<OfficerAssignedComplaintsPage />} />
+          <Route path="needs-location" element={<OfficerNeedsLocationPage />} />
           <Route path="proof" element={<OfficerProofUploadPage />} />
           <Route path="verifications" element={<OfficerPendingVerificationsPage />} />
         </Route>

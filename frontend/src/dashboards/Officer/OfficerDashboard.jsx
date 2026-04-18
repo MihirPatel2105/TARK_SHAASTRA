@@ -1,4 +1,4 @@
-import { ClipboardList, CheckCircle2, ShieldCheck, UploadCloud } from "lucide-react";
+import { ClipboardList, CheckCircle2, ShieldCheck, UploadCloud, LocateFixed } from "lucide-react";
 import { useContext } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppContext } from "../../App";
@@ -14,6 +14,7 @@ function OfficerDashboardPage() {
 
   const cards = [
     { title: "Assigned Complaints", description: "Review complaints assigned to your desk.", icon: ClipboardList, colorClass: "bg-blue-600", path: "/officer/assigned" },
+    { title: "Needs Location / IVR", description: "Handle IVR complaints missing location details.", icon: LocateFixed, colorClass: "bg-indigo-600", path: "/officer/needs-location" },
     { title: "Upload Proof", description: "Submit evidence and GPS confirmation.", icon: UploadCloud, colorClass: "bg-emerald-600", path: "/officer/proof" },
     { title: "Pending Verifications", description: "See items waiting for citizen confirmation.", icon: ShieldCheck, colorClass: "bg-amber-600", path: "/officer/verifications" }
   ];
@@ -32,7 +33,7 @@ function OfficerDashboardPage() {
         <MetricCard label="Awaiting Verification" value={awaiting.length} helper="Still waiting for confirmation" accent="yellow" />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-4">
         {cards.map((card) => (
           <DashboardCard key={card.title} {...card} onClick={() => navigate(card.path)} />
         ))}

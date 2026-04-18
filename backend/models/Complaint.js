@@ -37,6 +37,29 @@ const ComplaintSchema = new Schema(
       trim: true,
       index: true
     },
+    source: {
+      type: String,
+      enum: ['APP_IMAGE', 'APP_TEXT', 'IVR_CALL'],
+      default: 'APP_IMAGE',
+      index: true
+    },
+    location_status: {
+      type: String,
+      enum: ['AVAILABLE', 'MISSING', 'NEEDS_IVR_FOLLOWUP'],
+      default: 'AVAILABLE',
+      index: true
+    },
+    location_text: {
+      type: String,
+      trim: true,
+      default: null
+    },
+    citizen_phone: {
+      type: String,
+      trim: true,
+      default: null,
+      index: true
+    },
     location: {
       type: {
         type: String,
@@ -45,7 +68,7 @@ const ComplaintSchema = new Schema(
       },
       coordinates: {
         type: [Number],
-        required: true
+        default: undefined
       }
     },
     user_location: {
@@ -126,6 +149,45 @@ const ComplaintSchema = new Schema(
       model_results: {
         type: [Schema.Types.Mixed],
         default: []
+      },
+      detected_location_text: {
+        type: String,
+        default: null
+      },
+      extracted_coordinates: {
+        type: [Number],
+        default: undefined
+      },
+      summary: {
+        type: String,
+        default: null
+      }
+    },
+    ivr_metadata: {
+      call_sid: {
+        type: String,
+        default: null
+      },
+      recording_url: {
+        type: String,
+        default: null
+      },
+      transcript_text: {
+        type: String,
+        default: null
+      },
+      followup_call_sid: {
+        type: String,
+        default: null
+      },
+      followup_triggered_at: {
+        type: Date,
+        default: null
+      },
+      followup_status: {
+        type: String,
+        enum: ['NOT_REQUIRED', 'PENDING', 'TRIGGERED', 'COLLECTED'],
+        default: 'NOT_REQUIRED'
       }
     },
     resolved_image: {
@@ -193,6 +255,25 @@ const ComplaintSchema = new Schema(
     },
     verified_at: {
       type: Date
+    },
+    scoring: {
+      citizen_points_delta: {
+        type: Number,
+        default: 0
+      },
+      department_points_delta: {
+        type: Number,
+        default: 0
+      },
+      score_reason: {
+        type: String,
+        default: null
+      },
+      fake_complaint_flag: {
+        type: Number,
+        enum: [0, 1],
+        default: 0
+      }
     }
   },
   {

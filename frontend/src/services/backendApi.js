@@ -42,8 +42,9 @@ function titleCaseStatus(status) {
 }
 
 export function toUiComplaint(complaint) {
-  const coordinates = complaint.coordinates || complaint.location?.coordinates || [0, 0];
-  const [lng, lat] = coordinates;
+  const coordinates = complaint.coordinates || complaint.location?.coordinates || [];
+  const hasCoordinates = Array.isArray(coordinates) && coordinates.length === 2;
+  const [lng = null, lat = null] = hasCoordinates ? coordinates : [null, null];
   const created = complaint.created_at ? new Date(complaint.created_at).toISOString().slice(0, 10) : "--";
   const resolved = complaint.resolved_at ? new Date(complaint.resolved_at).toISOString().slice(0, 10) : null;
 
@@ -64,12 +65,18 @@ export function toUiComplaint(complaint) {
     description: complaint.description,
     department: complaint.department,
     status: titleCaseStatus(complaint.status),
+    source: complaint.source || "APP_TEXT",
+    locationStatus: complaint.location_status || "AVAILABLE",
+    locationText: complaint.location_text || null,
+    citizenPhone: complaint.citizen_phone || null,
+    transcriptText: complaint.ivr_metadata?.transcript_text || null,
+    recordingUrl: complaint.ivr_metadata?.recording_url || null,
     createdAt: created,
     resolvedAt: resolved,
     location: {
-      lat: Number(lat || 0),
-      lng: Number(lng || 0),
-      area: complaint.location_name || `${Number(lat || 0).toFixed(5)}, ${Number(lng || 0).toFixed(5)}`
+      lat: hasCoordinates ? Number(lat) : null,
+      lng: hasCoordinates ? Number(lng) : null,
+      area: complaint.location_name || complaint.location_text || (hasCoordinates ? `${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}` : "Location pending")
     },
     verification: {
       ivrResponse: Number(complaint.ivr_response) === 2 ? "Yes" : "No",
@@ -217,6 +224,36 @@ export async function fetchOfficerComplaints(status) {
   });
   const data = await parseResponse(response);
   return (data.complaints || []).map(toUiComplaint);
+}
+
+export async function fetchOfficerNeedsLocationComplaints(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      params.set(key, String(value));
+    }
+  });
+
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const response = await apiFetch(`${API_BASE_URL}/officer/complaints/needs-location${query}`, {
+    headers: buildAuthHeaders()
+  });
+
+  const data = await parseResponse(response);
+  return (data.complaints || []).map(toUiComplaint);
+}
+
+export async function triggerOfficerLocationFollowup(complaintId, payload = {}) {
+  const response = await apiFetch(`${API_BASE_URL}/officer/complaints/${complaintId}/trigger-location-ivr`, {
+    method: "POST",
+    headers: buildAuthHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify(payload)
+  });
+
+  const data = await parseResponse(response);
+  return toUiComplaint(data.complaint);
 }
 
 export async function startOfficerComplaint(complaintId) {
