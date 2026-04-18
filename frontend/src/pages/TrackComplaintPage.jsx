@@ -9,7 +9,7 @@ function TrackComplaintPage() {
   const navigate = useNavigate();
 
   const citizenComplaints = useMemo(
-    () => complaints.filter((item) => !item.citizenEmail || item.citizenEmail === user?.email),
+    () => complaints.filter((item) => item.createdById === user?.id || item.citizenEmail === user?.email),
     [complaints, user?.email]
   );
   const reopened = citizenComplaints.find((item) => item.status === "Reopened" || item.status === "Failed");

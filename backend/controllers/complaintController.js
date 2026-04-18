@@ -4,6 +4,7 @@ const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const { uploadBufferToCloudinary } = require('../services/cloudinaryService');
 const { classifyImageByAllModels } = require('../services/roboflowService');
+const { triggerComplaintVerificationCall, triggerLocationCollectionCall } = require('../services/ivrBridgeService');
 const { haversineDistanceMeters } = require('../utils/geo');
 const { extractImageGps } = require('../utils/imageGps');
 
@@ -135,6 +136,42 @@ function resolveDepartment(departmentInput, grievanceType) {
   return normalizeDepartment(departmentInput) || inferDepartmentFromGrievanceType(grievanceType);
 }
 
+function normalizeDepartmentKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getDepartmentVariants(department) {
+  const key = normalizeDepartmentKey(department);
+
+  if (/road/.test(key)) {
+    return ['Roads', 'Road Maintenance'];
+  }
+
+  if (/water/.test(key)) {
+    return ['Water', 'Water Supply'];
+  }
+
+  if (/electric|power/.test(key)) {
+    return ['Electricity', 'Power'];
+  }
+
+  if (/sanitation|garbage|waste/.test(key)) {
+    return ['Sanitation'];
+  }
+
+  return department ? [department] : [];
+}
+
+function isDepartmentMatch(officerDepartment, complaintDepartment) {
+  if (!officerDepartment || !complaintDepartment) {
+    return false;
+  }
+
+  return getDepartmentVariants(officerDepartment)
+    .map((item) => normalizeDepartmentKey(item))
+    .includes(normalizeDepartmentKey(complaintDepartment));
+}
+
 async function getNearbyComplaintsByLocation(point, radiusMeters, grievanceType) {
   const complaints = await Complaint.find({
     grievance_type: grievanceType,
@@ -190,7 +227,9 @@ const createComplaint = asyncHandler(async (req, res) => {
     assign_officer_id,
     force_create,
     source: sourceInput,
-    location_text
+    location_text,
+    citizen_email,
+    citizen_phone
   } = req.body;
 
   if (!grievance_id || !grievance_type) {
@@ -294,6 +333,12 @@ const createComplaint = asyncHandler(async (req, res) => {
     source,
     location_status: locationStatus,
     location_text: typeof location_text === 'string' && location_text.trim().length ? location_text.trim() : null,
+    citizen_email: typeof citizen_email === 'string' && citizen_email.trim().length
+      ? citizen_email.trim().toLowerCase()
+      : (req.user?.email || null),
+    citizen_phone: typeof citizen_phone === 'string' && citizen_phone.trim().length
+      ? citizen_phone.trim()
+      : (req.user?.phone || null),
     location: hasLocation ? location : undefined,
     user_location: userLocation,
     image_location: imageLocation,
@@ -384,6 +429,28 @@ const getNearbyComplaints = asyncHandler(async (req, res) => {
   });
 });
 
+const getMyComplaints = asyncHandler(async (req, res) => {
+  if (!req.user?._id) {
+    res.status(401);
+    throw new Error('Authentication required');
+  }
+
+  const complaints = await Complaint.find({
+    $or: [
+      { created_by: req.user._id },
+      { citizen_email: req.user.email },
+      { citizen_phone: req.user.phone }
+    ]
+  })
+    .sort({ created_at: -1 })
+    .lean();
+
+  res.json({
+    count: complaints.length,
+    complaints: complaints.map(serializeComplaint)
+  });
+});
+
 const createIvrComplaint = asyncHandler(async (req, res) => {
   const {
     grievance_id,
@@ -391,6 +458,7 @@ const createIvrComplaint = asyncHandler(async (req, res) => {
     description,
     transcript_text,
     citizen_phone,
+    citizen_email,
     department: departmentInput,
     grievance_type,
     call_sid,
@@ -398,7 +466,11 @@ const createIvrComplaint = asyncHandler(async (req, res) => {
     location_text
   } = req.body;
 
-  if (!citizen_phone || !String(citizen_phone).trim()) {
+  const resolvedCitizenPhone = typeof citizen_phone === 'string' && citizen_phone.trim().length
+    ? citizen_phone.trim()
+    : (req.user?.phone || null);
+
+  if (!resolvedCitizenPhone) {
     res.status(400);
     throw new Error('citizen_phone is required for IVR complaint registration');
   }
@@ -428,7 +500,8 @@ const createIvrComplaint = asyncHandler(async (req, res) => {
     location: hasLocation ? location : undefined,
     location_status: hasLocation ? 'AVAILABLE' : 'NEEDS_IVR_FOLLOWUP',
     location_text: typeof location_text === 'string' && location_text.trim().length ? location_text.trim() : null,
-    citizen_phone: citizen_phone.trim(),
+    citizen_phone: resolvedCitizenPhone,
+    citizen_email: typeof citizen_email === 'string' && citizen_email.trim().length ? citizen_email.trim().toLowerCase() : null,
     ai_classification: {
       department_from_ai: resolvedDepartment,
       decision: 'AUTO_ASSIGNED',
@@ -487,11 +560,25 @@ const triggerLocationFollowupIvr = asyncHandler(async (req, res) => {
     throw new Error('Complaint not found');
   }
 
+  const phone = req.body.citizen_phone || complaint.citizen_phone;
+  const ivrTriggerResult = await triggerLocationCollectionCall({
+    complaintId: String(complaint._id),
+    to: phone
+  });
+
+  if (phone && !complaint.citizen_phone) {
+    complaint.citizen_phone = phone;
+  }
+
   complaint.location_status = 'NEEDS_IVR_FOLLOWUP';
   complaint.ivr_metadata = {
     ...complaint.ivr_metadata,
     followup_status: 'TRIGGERED',
-    followup_call_sid: req.body.followup_call_sid || complaint.ivr_metadata?.followup_call_sid || null,
+    followup_call_sid:
+      req.body.followup_call_sid ||
+      ivrTriggerResult.call_sid ||
+      complaint.ivr_metadata?.followup_call_sid ||
+      null,
     followup_triggered_at: new Date()
   };
 
@@ -499,6 +586,80 @@ const triggerLocationFollowupIvr = asyncHandler(async (req, res) => {
 
   res.json({
     message: 'IVR follow-up for location marked as triggered',
+    ivr_trigger: ivrTriggerResult,
+    complaint: serializeComplaint(complaint.toObject())
+  });
+});
+
+const ingestIvrLocationUpdate = asyncHandler(async (req, res) => {
+  const complaint = await Complaint.findById(req.params.id);
+  if (!complaint) {
+    res.status(404);
+    throw new Error('Complaint not found');
+  }
+
+  const lat = parseNumber(req.body.lat);
+  const lng = parseNumber(req.body.lng);
+  const hasCoordinates = lat !== null && lng !== null;
+
+  if (hasCoordinates) {
+    complaint.location = {
+      type: 'Point',
+      coordinates: [lng, lat]
+    };
+    complaint.location_status = 'AVAILABLE';
+  }
+
+  if (typeof req.body.location_text === 'string' && req.body.location_text.trim().length) {
+    complaint.location_text = req.body.location_text.trim();
+  }
+
+  complaint.ivr_metadata = {
+    ...complaint.ivr_metadata,
+    transcript_text: req.body.transcript_text || complaint.ivr_metadata?.transcript_text || null,
+    followup_call_sid: req.body.call_sid || complaint.ivr_metadata?.followup_call_sid || null,
+    followup_status: hasCoordinates ? 'COLLECTED' : (complaint.ivr_metadata?.followup_status || 'PENDING')
+  };
+
+  await complaint.save();
+
+  res.json({
+    message: hasCoordinates ? 'IVR location captured successfully' : 'IVR location update recorded without coordinates',
+    complaint: serializeComplaint(complaint.toObject())
+  });
+});
+
+const ingestIvrVerificationResponse = asyncHandler(async (req, res) => {
+  const complaint = await Complaint.findById(req.params.id);
+  if (!complaint) {
+    res.status(404);
+    throw new Error('Complaint not found');
+  }
+
+  const responseValue = parseNumber(req.body.ivr_response);
+  if (![1, 2].includes(responseValue)) {
+    res.status(400);
+    throw new Error('ivr_response must be 1 (verified) or 2 (reopen)');
+  }
+
+  complaint.ivr_response = responseValue;
+  complaint.ivr_metadata = {
+    ...complaint.ivr_metadata,
+    call_sid: req.body.call_sid || complaint.ivr_metadata?.call_sid || null,
+    transcript_text: req.body.transcript_text || complaint.ivr_metadata?.transcript_text || null
+  };
+
+  if (responseValue === 2) {
+    complaint.status = 'REOPENED';
+    complaint.verification_status = 'REOPENED';
+    complaint.reopen_flag = 1;
+    complaint.verified_at = undefined;
+  }
+
+  await complaint.save();
+
+  res.json({
+    message: 'IVR verification response recorded',
     complaint: serializeComplaint(complaint.toObject())
   });
 });
@@ -595,8 +756,10 @@ const getOfficerComplaints = asyncHandler(async (req, res) => {
     throw new Error('Officer department is required on user profile');
   }
 
+  const departmentVariants = getDepartmentVariants(req.user.department);
+
   const query = {
-    department: req.user.department,
+    department: { $in: departmentVariants.length ? departmentVariants : [req.user.department] },
     status: { $in: OFFICER_TRACKED_STATUSES }
   };
 
@@ -631,7 +794,7 @@ const startComplaintWork = asyncHandler(async (req, res) => {
     throw new Error('Complaint not found');
   }
 
-  if (complaint.department !== req.user.department) {
+  if (!isDepartmentMatch(req.user.department, complaint.department)) {
     res.status(403);
     throw new Error('You can only start complaints in your department');
   }
@@ -664,7 +827,7 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
     throw new Error('Complaint not found');
   }
 
-  if (complaint.department !== req.user.department) {
+  if (!isDepartmentMatch(req.user.department, complaint.department)) {
     res.status(403);
     throw new Error('You can only resolve complaints in your department');
   }
@@ -729,6 +892,24 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
   complaint.verification_status = 'PENDING';
   complaint.reopen_flag = 0;
   complaint.resolved_at = new Date();
+
+  const citizenPhone = req.body.citizen_phone || complaint.citizen_phone;
+  if (citizenPhone && !complaint.citizen_phone) {
+    complaint.citizen_phone = citizenPhone;
+  }
+
+  const ivrTriggerResult = await triggerComplaintVerificationCall({
+    complaintId: String(complaint._id),
+    to: complaint.citizen_phone
+  });
+
+  if (ivrTriggerResult.call_sid) {
+    complaint.ivr_metadata = {
+      ...complaint.ivr_metadata,
+      call_sid: ivrTriggerResult.call_sid
+    };
+  }
+
   await complaint.save();
 
   await User.findByIdAndUpdate(req.user._id, {
@@ -745,6 +926,7 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
       officer_to_complaint: Math.round(officerToComplaintMeters),
       image_to_complaint: Math.round(imageToComplaintMeters)
     },
+    ivr_trigger: ivrTriggerResult,
     complaint: serializeComplaint(complaint.toObject())
   });
 });
@@ -819,8 +1001,11 @@ module.exports = {
   createComplaint,
   createIvrComplaint,
   getNearbyComplaints,
+  getMyComplaints,
   getNeedsLocationComplaints,
   triggerLocationFollowupIvr,
+  ingestIvrLocationUpdate,
+  ingestIvrVerificationResponse,
   getComplaintById,
   voteOnComplaint,
   resolveComplaint,

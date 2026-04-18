@@ -6,7 +6,7 @@ import VerificationIndicator from "../components/VerificationIndicator";
 function ResolvedComplaintsPage() {
   const { complaints, user } = useContext(AppContext);
   const resolved = useMemo(
-    () => complaints.filter((item) => (item.citizenEmail ? item.citizenEmail === user?.email : true) && item.status === "Verified"),
+    () => complaints.filter((item) => (item.createdById === user?.id || item.citizenEmail === user?.email) && item.status === "Verified"),
     [complaints, user?.email]
   );
 

@@ -5,6 +5,7 @@ import { createComplaint } from "../services/backendApi";
 import { departments } from "../services/mockData";
 
 const grievanceTypes = ["Pothole", "Leakage", "Power Cut", "Garbage", "General"];
+const MAX_ALLOWED_ACCURACY_METERS = 100;
 const initialForm = {
   title: "",
   description: "",
@@ -16,7 +17,7 @@ const initialForm = {
 };
 
 function NewComplaintPage() {
-  const { addComplaint, user } = useContext(AppContext);
+  const { user, refreshComplaints } = useContext(AppContext);
   const [mode, setMode] = useState("IMAGE");
   const [step, setStep] = useState(1);
   const [form, setForm] = useState(initialForm);
@@ -24,6 +25,7 @@ function NewComplaintPage() {
   const [success, setSuccess] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [queueMessage, setQueueMessage] = useState("");
+  const [locationAccuracyMeters, setLocationAccuracyMeters] = useState(null);
 
   const [preview, setPreview] = useState("");
 
@@ -39,6 +41,14 @@ function NewComplaintPage() {
     return () => URL.revokeObjectURL(objectUrl);
   }, [form.image]);
 
+  useEffect(() => {
+    if (mode === "IMAGE" && !form.location) {
+      fetchLocation();
+    }
+    // Intentionally run on mode switch so geo-tagged complaints capture a live browser location.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
   const setField = (name, value) => {
     setForm((prev) => ({ ...prev, [name]: value }));
     setError("");
@@ -49,15 +59,85 @@ function NewComplaintPage() {
   const fetchLocation = () => {
     if (!navigator.geolocation) {
       setError("Geolocation is not supported in your browser.");
-      return;
+      return Promise.resolve(false);
     }
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        setField("location", `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
-      },
-      () => setError("Unable to fetch your location. Please enter manually.")
-    );
+
+    if (typeof navigator.geolocation.watchPosition !== "function") {
+      return new Promise((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const { latitude, longitude, accuracy } = position.coords;
+            setLocationAccuracyMeters(Number.isFinite(accuracy) ? Math.round(accuracy) : null);
+            setField("location", `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+            resolve(true);
+          },
+          () => {
+            setError("Unable to fetch your location. Please enter manually.");
+            resolve(false);
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0
+          }
+        );
+      });
+    }
+
+    return new Promise((resolve) => {
+      let settled = false;
+      let watchId = null;
+      let bestFix = null;
+
+      const finish = (success) => {
+        if (settled) return;
+        settled = true;
+        if (watchId !== null) {
+          navigator.geolocation.clearWatch(watchId);
+        }
+        resolve(success);
+      };
+
+      const timeoutId = window.setTimeout(() => {
+        if (bestFix) {
+          const { latitude, longitude, accuracy } = bestFix;
+          setLocationAccuracyMeters(Number.isFinite(accuracy) ? Math.round(accuracy) : null);
+          setField("location", `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+          finish(true);
+          return;
+        }
+
+        setError("Unable to fetch precise location. Please try Auto Locate again.");
+        finish(false);
+      }, 12000);
+
+      watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          const { latitude, longitude, accuracy } = position.coords;
+
+          if (!bestFix || accuracy < bestFix.accuracy) {
+            bestFix = { latitude, longitude, accuracy };
+          }
+
+          if (Number.isFinite(accuracy) && accuracy <= 60) {
+            window.clearTimeout(timeoutId);
+            setLocationAccuracyMeters(Math.round(accuracy));
+            setField("location", `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+            finish(true);
+          }
+        },
+        () => {
+          window.clearTimeout(timeoutId);
+          setError("Unable to fetch your location. Please enter manually.");
+          finish(false);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0
+        }
+      );
+    });
   };
 
   const parseLocationCoordinates = (locationInput) => {
@@ -88,9 +168,22 @@ function NewComplaintPage() {
       return;
     }
 
-    if (mode === "IMAGE" && !form.location) {
-      setError("Image mode requires coordinates so geo-tag validation can run.");
-      return;
+    if (mode === "IMAGE") {
+      const fetched = await fetchLocation();
+      if (!fetched) {
+        setError("Image mode requires coordinates so geo-tag validation can run.");
+        return;
+      }
+
+      if (!Number.isFinite(locationAccuracyMeters)) {
+        setError("Unable to verify GPS accuracy. Please tap Auto Locate again in open sky.");
+        return;
+      }
+
+      if (locationAccuracyMeters > MAX_ALLOWED_ACCURACY_METERS) {
+        setError(`GPS accuracy too low (~${locationAccuracyMeters}m). Required: <= ${MAX_ALLOWED_ACCURACY_METERS}m. Move outdoors and retry Auto Locate.`);
+        return;
+      }
     }
 
     let locationPayload = { hasCoordinates: false, lat: null, lng: null };
@@ -115,10 +208,12 @@ function NewComplaintPage() {
         lng: locationPayload.hasCoordinates ? locationPayload.lng : undefined,
         location_text: form.locationText || undefined,
         image: mode === "IMAGE" ? form.image : undefined,
-        created_by: user?.id
+        created_by: user?.id,
+        citizen_email: user?.email,
+        citizen_phone: user?.phone
       });
 
-      addComplaint(apiComplaint);
+      await refreshComplaints();
       setSuccess(
         mode === "IMAGE"
           ? "Geo-tagged image complaint submitted successfully."
@@ -224,6 +319,9 @@ function NewComplaintPage() {
                 <LocateFixed size={16} /> Auto Locate
               </button>
             </div>
+            {locationAccuracyMeters !== null ? (
+              <p className="text-xs text-slate-600">Current GPS accuracy: ~{locationAccuracyMeters}m (required {"<="} {MAX_ALLOWED_ACCURACY_METERS}m for image mode)</p>
+            ) : null}
             <input
               type="text"
               placeholder="Location description (optional, e.g. Near Main Bus Stand)"

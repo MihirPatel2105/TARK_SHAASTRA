@@ -9,6 +9,18 @@ const NEARBY_RADIUS_KM = 3;
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
 
+function hasValidCoordinates(lat, lng) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return false;
+  }
+
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return false;
+  }
+
+  return !(lat === 0 && lng === 0);
+}
+
 function haversineKm(a, b) {
   const toRadians = (value) => (value * Math.PI) / 180;
   const earthRadius = 6371;
@@ -23,6 +35,8 @@ function haversineKm(a, b) {
 }
 
 function markerColor(status) {
+  if (status === "Pending") return "#1d4ed8";
+  if (status === "In Progress") return "#f59e0b";
   if (status === "Verified") return "#16a34a";
   if (status === "Resolved") return "#0284c7";
   if (status === "Reopened" || status === "Failed") return "#e11d48";
@@ -104,20 +118,9 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
     }
   };
 
-  const onMapLoad = (map) => {
-    mapRef.current = map;
-  };
-
   const onMapUnmount = () => {
     mapRef.current = null;
   };
-
-  useEffect(() => {
-    if (!mapRef.current || !isLoaded) return;
-
-    window.google.maps.event.trigger(mapRef.current, "resize");
-    mapRef.current.setCenter(currentLocation || DEFAULT_CENTER);
-  }, [isFullscreen, currentLocation, isLoaded]);
 
   const loadNearbyFromBackend = async () => {
     setSyncMessage("");
@@ -152,66 +155,91 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
     [complaints, department, status]
   );
 
-  const selected = filtered.find((item) => item.id === selectedId) || filtered[0] || null;
+  const mapMarkers = useMemo(
+    () =>
+      filtered
+        .map((item) => ({
+          ...item,
+          lat: Number(item.location?.lat),
+          lng: Number(item.location?.lng)
+        }))
+        .filter((item) => hasValidCoordinates(item.lat, item.lng)),
+    [filtered]
+  );
+
+  const onMapLoad = (map) => {
+    mapRef.current = map;
+    const firstMarker = mapMarkers[0];
+    const preferredCenter = firstMarker
+      ? { lat: firstMarker.lat, lng: firstMarker.lng }
+      : (currentLocation || DEFAULT_CENTER);
+    map.setCenter(preferredCenter);
+    map.setZoom(11);
+  };
+
+  useEffect(() => {
+    if (!mapRef.current || !isLoaded) return;
+
+    const previousCenter = mapRef.current.getCenter()?.toJSON();
+    window.google.maps.event.trigger(mapRef.current, "resize");
+
+    if (previousCenter && hasValidCoordinates(previousCenter.lat, previousCenter.lng)) {
+      mapRef.current.setCenter(previousCenter);
+      return;
+    }
+
+    if (mapMarkers.length) {
+      mapRef.current.setCenter({ lat: mapMarkers[0].lat, lng: mapMarkers[0].lng });
+      return;
+    }
+
+    mapRef.current.setCenter(currentLocation || DEFAULT_CENTER);
+  }, [isFullscreen, isLoaded, mapMarkers, currentLocation]);
+
+  const selected = mapMarkers.find((item) => item.id === selectedId) || mapMarkers[0] || null;
+
+  const pendingTotal = useMemo(
+    () => filtered.filter((item) => item.status === "Pending").length,
+    [filtered]
+  );
+
+  const pendingPlotted = useMemo(
+    () => mapMarkers.filter((item) => item.status === "Pending").length,
+    [mapMarkers]
+  );
 
   const nearbyRows = useMemo(() => {
     if (!currentLocation) return [];
 
     return filtered
       .map((item) => {
-        const lat = Number(item.location?.lat || 0);
-        const lng = Number(item.location?.lng || 0);
+        const lat = Number(item.location?.lat);
+        const lng = Number(item.location?.lng);
+
+        if (!hasValidCoordinates(lat, lng)) {
+          return null;
+        }
+
         return {
           ...item,
           distanceKm: haversineKm(currentLocation, { lat, lng })
         };
       })
+      .filter(Boolean)
       .sort((a, b) => a.distanceKm - b.distanceKm);
   }, [filtered, currentLocation]);
 
   const nearbyWithinRadius = nearbyRows.filter((item) => item.distanceKm <= NEARBY_RADIUS_KM);
-  const mapMarkers = useMemo(
-    () =>
-      filtered.map((item) => ({
-        ...item,
-        lat: Number(item.location?.lat || 0),
-        lng: Number(item.location?.lng || 0)
-      })),
-    [filtered]
-  );
   const mapHeightClass = isFullscreen ? "h-screen" : "h-[70vh]";
 
-  useEffect(() => {
-    if (!mapRef.current || !isLoaded) return;
-
-    const bounds = new window.google.maps.LatLngBounds();
-    let hasPoints = false;
-
-    filtered.forEach((item) => {
-      const lat = Number(item.location?.lat || 0);
-      const lng = Number(item.location?.lng || 0);
-
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        return;
-      }
-
-      bounds.extend({ lat, lng });
-      hasPoints = true;
-    });
-
-    if (currentLocation) {
-      bounds.extend(currentLocation);
-      hasPoints = true;
-    }
-
-    if (!hasPoints) {
-      mapRef.current.setCenter(DEFAULT_CENTER);
-      mapRef.current.setZoom(11);
+  const focusComplaintsOnMap = () => {
+    if (!mapRef.current || !mapMarkers.length) {
       return;
     }
 
-    mapRef.current.fitBounds(bounds, 48);
-  }, [filtered, currentLocation, isLoaded]);
+    mapRef.current.setCenter({ lat: mapMarkers[0].lat, lng: mapMarkers[0].lng });
+    mapRef.current.setZoom(11);
+  };
 
   return (
     <section className="space-y-6">
@@ -233,6 +261,9 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
         <button type="button" onClick={toggleFullscreen} className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
           {isFullscreen ? "Exit Full Mode" : "Open Full Mode"}
         </button>
+        <button type="button" onClick={focusComplaintsOnMap} className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
+          Show Complaint Markers
+        </button>
         {syncMessage ? <p className="rounded-full bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700">{syncMessage}</p> : null}
         {syncError ? <p className="rounded-full bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700">{syncError}</p> : null}
         {locationError ? <p className="rounded-full bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700">{locationError}</p> : null}
@@ -241,6 +272,9 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
             You are here: {currentLocation.lat.toFixed(5)}, {currentLocation.lng.toFixed(5)}
           </p>
         ) : null}
+        <p className="rounded-full bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700">
+          Pending markers: {pendingPlotted}/{pendingTotal}
+        </p>
       </div>
 
       {!GOOGLE_MAPS_API_KEY ? (
@@ -302,7 +336,20 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
               >
                 {currentLocation ? (
                   <>
-                    <MarkerF position={currentLocation} title="Your Current Location" />
+                    <MarkerF
+                      position={currentLocation}
+                      title="Your Current Location"
+                      icon={{
+                        path: window.google?.maps?.SymbolPath?.CIRCLE,
+                        fillColor: "#ffffff",
+                        fillOpacity: 1,
+                        strokeColor: "#0ea5e9",
+                        strokeOpacity: 1,
+                        strokeWeight: 2,
+                        scale: 7
+                      }}
+                      zIndex={1}
+                    />
                     <CircleF
                       center={currentLocation}
                       radius={NEARBY_RADIUS_KM * 1000}
@@ -323,13 +370,14 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
                     position={{ lat: item.lat, lng: item.lng }}
                     onClick={() => setSelectedId(item.id)}
                     title={item.title}
+                    zIndex={item.status === "Pending" ? 20 : 10}
                     icon={{
                       path: window.google?.maps?.SymbolPath?.CIRCLE,
                       fillColor: markerColor(item.status),
                       fillOpacity: 1,
                       strokeColor: "#ffffff",
                       strokeWeight: 2,
-                      scale: 8
+                      scale: item.status === "Pending" ? 10 : 8
                     }}
                   />
                 ))}

@@ -4,10 +4,10 @@ import Modal from "../../components/Modal";
 import StatusBadge from "../../components/StatusBadge";
 import Timeline from "../../components/Timeline";
 import VerificationIndicator from "../../components/VerificationIndicator";
-import { verifyAdminComplaint } from "../../services/backendApi";
+import { submitIvrResponseForComplaint, verifyAdminComplaint } from "../../services/backendApi";
 
 function AdminComplaintsPage() {
-  const { complaints, updateComplaint } = useContext(AppContext);
+  const { complaints, refreshComplaints } = useContext(AppContext);
   const [selectedId, setSelectedId] = useState(complaints[0]?.id || "");
   const [showIvr, setShowIvr] = useState(false);
   const [sourceFilter, setSourceFilter] = useState("ALL");
@@ -28,20 +28,20 @@ function AdminComplaintsPage() {
     [filteredComplaints, selectedId]
   );
 
-  const decideFinalStatus = (ivrResponse, complaint) => {
-    if (ivrResponse === "Yes" && complaint.verification?.gpsMatch && complaint.verification?.photoUploaded) return "Verified";
-    if (ivrResponse === "No") return complaint.resolvedAt ? "Reopened" : "Failed";
-    return "Resolved";
-  };
+  const handleIvr = async (ivrResponse) => {
+    if (!selected?.id) {
+      return;
+    }
 
-  const handleIvr = (ivrResponse) => {
-    const date = new Date().toISOString().slice(0, 10);
-    updateComplaint(selected.id, {
-      verification: { ivrResponse, gpsMatch: Boolean(selected.verification?.gpsMatch), photoUploaded: Boolean(selected.verification?.photoUploaded) },
-      status: decideFinalStatus(ivrResponse, selected),
-      timeline: [...(selected.timeline || []), { label: `IVR Response: ${ivrResponse}`, date }]
-    });
-    setShowIvr(false);
+    setActionError("");
+
+    try {
+      await submitIvrResponseForComplaint(selected.id, ivrResponse === "Yes" ? 1 : 2, `Admin simulated IVR: ${ivrResponse}`);
+      await refreshComplaints();
+      setShowIvr(false);
+    } catch (error) {
+      setActionError(error.message || "Unable to submit IVR response.");
+    }
   };
 
   const applyVerificationDecision = async (status) => {
@@ -52,21 +52,8 @@ function AdminComplaintsPage() {
     setActionError("");
 
     try {
-      const updated = await verifyAdminComplaint(selected.id, status);
-      updateComplaint(selected.id, {
-        status: updated.status,
-        verification: updated.verification,
-        scoring: updated.scoring,
-        source: updated.source,
-        locationStatus: updated.locationStatus,
-        timeline: [
-          ...(selected.timeline || []),
-          {
-            label: `Admin decision: ${status}`,
-            date: new Date().toISOString().slice(0, 10)
-          }
-        ]
-      });
+      await verifyAdminComplaint(selected.id, status);
+      await refreshComplaints();
     } catch (error) {
       setActionError(error.message || "Unable to update admin decision.");
     }

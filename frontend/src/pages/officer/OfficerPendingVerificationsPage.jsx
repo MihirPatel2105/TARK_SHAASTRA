@@ -5,8 +5,8 @@ import VerificationIndicator from "../../components/VerificationIndicator";
 function OfficerPendingVerificationsPage() {
   const { complaints, user } = useContext(AppContext);
   const pending = useMemo(
-    () => complaints.filter((item) => (item.assignedOfficerEmail ? item.assignedOfficerEmail === user?.email : true) && (item.status === "Pending" || item.status === "Resolved")),
-    [complaints, user?.email]
+    () => complaints.filter((item) => (item.assignedOfficerId === user?.id || item.assignedToId === user?.id) && (item.status === "Pending" || item.status === "Resolved" || item.status === "In Progress")),
+    [complaints, user?.id]
   );
 
   return (

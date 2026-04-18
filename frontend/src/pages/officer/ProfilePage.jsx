@@ -6,14 +6,15 @@ function OfficerProfilePage() {
   const { user, complaints } = useContext(AppContext);
 
   const stats = useMemo(() => {
-    const assigned = complaints.filter((item) => item.status === "Pending" || item.status === "In Progress" || item.status === "Resolved").length;
-    const resolved = complaints.filter((item) => item.status === "Resolved").length;
-    const verified = complaints.filter((item) => item.status === "Verified").length;
-    const attention = complaints.filter((item) => item.status === "Reopened" || item.status === "Failed").length;
+    const assignedCases = complaints.filter((item) => item.assignedOfficerId === user?.id || item.assignedToId === user?.id);
+    const assigned = assignedCases.length;
+    const resolved = assignedCases.filter((item) => item.status === "Resolved").length;
+    const verified = assignedCases.filter((item) => item.status === "Verified").length;
+    const attention = assignedCases.filter((item) => item.status === "Reopened" || item.status === "Failed").length;
     return { assigned, resolved, verified, attention };
-  }, [complaints]);
+  }, [complaints, user?.id]);
 
-  const latest = complaints.slice(0, 6);
+  const latest = complaints.filter((item) => item.assignedOfficerId === user?.id || item.assignedToId === user?.id).slice(0, 6);
 
   return (
     <section className="space-y-8">
@@ -50,6 +51,7 @@ function OfficerProfilePage() {
           </div>
           <div className="mt-5 space-y-3 text-sm text-slate-700">
             <p className="flex items-center gap-2"><Mail size={15} className="text-slate-500" /> {user?.email || "Not available"}</p>
+            <p className="flex items-center gap-2"><UserCircle2 size={15} className="text-slate-500" /> {user?.phone || "Mobile number not available"}</p>
             <p className="flex items-center gap-2"><Shield size={15} className="text-slate-500" /> Role: {user?.role || "Officer"}</p>
             <p className="flex items-center gap-2"><MapPin size={15} className="text-slate-500" /> Department: {user?.department || "Operations"}</p>
             <p className="flex items-center gap-2"><Activity size={15} className="text-slate-500" /> Points: {user?.points ?? 0}</p>

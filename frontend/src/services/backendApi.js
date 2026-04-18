@@ -42,7 +42,19 @@ function titleCaseStatus(status) {
 }
 
 export function toUiComplaint(complaint) {
-  const coordinates = complaint.coordinates || complaint.location?.coordinates || [];
+  const coordinateCandidates = [
+    complaint.coordinates,
+    complaint.location?.coordinates,
+    complaint.user_location?.coordinates,
+    complaint.image_location?.coordinates,
+    complaint.resolved_user_location?.coordinates,
+    complaint.resolved_image_location?.coordinates,
+    complaint.ai_classification?.extracted_coordinates
+  ];
+
+  const coordinates = coordinateCandidates.find(
+    (value) => Array.isArray(value) && value.length === 2 && Number.isFinite(Number(value[0])) && Number.isFinite(Number(value[1]))
+  ) || [];
   const hasCoordinates = Array.isArray(coordinates) && coordinates.length === 2;
   const [lng = null, lat = null] = hasCoordinates ? coordinates : [null, null];
   const created = complaint.created_at ? new Date(complaint.created_at).toISOString().slice(0, 10) : "--";
@@ -69,6 +81,10 @@ export function toUiComplaint(complaint) {
     locationStatus: complaint.location_status || "AVAILABLE",
     locationText: complaint.location_text || null,
     citizenPhone: complaint.citizen_phone || null,
+    citizenEmail: complaint.citizen_email || null,
+    createdById: complaint.created_by || null,
+    assignedOfficerId: complaint.assigned_officer || null,
+    assignedToId: complaint.assigned_to || null,
     transcriptText: complaint.ivr_metadata?.transcript_text || null,
     recordingUrl: complaint.ivr_metadata?.recording_url || null,
     createdAt: created,
@@ -141,6 +157,7 @@ function toUiUser(user) {
     id: user.id || user._id,
     name: user.name,
     email: user.email,
+    phone: user.phone || null,
     role: normalizeRole(user.role),
     department: user.department || null,
     location: user.location,
@@ -214,6 +231,14 @@ export async function fetchNearbyComplaints({ lat, lng, radius = 2000, grievance
   }
 
   const response = await apiFetch(`${API_BASE_URL}/complaints/nearby?${params.toString()}`);
+  const data = await parseResponse(response);
+  return (data.complaints || []).map(toUiComplaint);
+}
+
+export async function fetchMyComplaints() {
+  const response = await apiFetch(`${API_BASE_URL}/complaints/mine`, {
+    headers: buildAuthHeaders()
+  });
   const data = await parseResponse(response);
   return (data.complaints || []).map(toUiComplaint);
 }
@@ -328,6 +353,22 @@ export async function verifyAdminComplaint(complaintId, verificationStatus) {
       "Content-Type": "application/json"
     }),
     body: JSON.stringify(body)
+  });
+
+  const data = await parseResponse(response);
+  return toUiComplaint(data.complaint);
+}
+
+export async function submitIvrResponseForComplaint(complaintId, ivrResponse, transcriptText) {
+  const response = await apiFetch(`${API_BASE_URL}/complaints/${complaintId}/ivr/response`, {
+    method: "POST",
+    headers: buildAuthHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify({
+      ivr_response: ivrResponse,
+      transcript_text: transcriptText
+    })
   });
 
   const data = await parseResponse(response);

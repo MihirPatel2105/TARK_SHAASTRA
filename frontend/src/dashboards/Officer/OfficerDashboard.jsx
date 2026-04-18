@@ -8,9 +8,10 @@ import MetricCard from "../../components/MetricCard";
 function OfficerDashboardPage() {
   const navigate = useNavigate();
   const { complaints, user } = useContext(AppContext);
-  const assigned = complaints.filter((item) => (item.assignedOfficerEmail ? item.assignedOfficerEmail === user?.email : true));
+  // Officer complaints from backend are already scoped to officer department/queue.
+  const assigned = complaints;
   const resolved = assigned.filter((item) => item.status === "Resolved" || item.status === "Verified");
-  const awaiting = assigned.filter((item) => item.status === "Pending" || item.status === "Resolved");
+  const awaiting = assigned.filter((item) => item.status === "Pending" || item.status === "Resolved" || item.status === "In Progress");
 
   const cards = [
     { title: "Assigned Complaints", description: "Review complaints assigned to your desk.", icon: ClipboardList, colorClass: "bg-blue-600", path: "/officer/assigned" },

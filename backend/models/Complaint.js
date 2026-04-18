@@ -60,6 +60,13 @@ const ComplaintSchema = new Schema(
       default: null,
       index: true
     },
+    citizen_email: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: null,
+      index: true
+    },
     location: {
       type: {
         type: String,
