@@ -14,6 +14,7 @@ import NewComplaintPage from "./pages/citizen/NewComplaintPage";
 import TrackComplaintPage from "./pages/citizen/TrackComplaintPage";
 import ResolvedComplaintsPage from "./pages/citizen/ResolvedComplaintsPage";
 import ComplaintDetailsPage from "./pages/citizen/ComplaintDetailsPage";
+import IVRPage from "./pages/citizen/IVRPage";
 import OfficerDashboardPage from "./dashboards/Officer/OfficerDashboard";
 import OfficerAssignedComplaintsPage from "./pages/officer/OfficerAssignedComplaintsPage";
 import OfficerProofUploadPage from "./pages/officer/OfficerProofUploadPage";
@@ -53,7 +54,7 @@ function App() {
   const [user, setUser] = useState(() => {
     const storedUser = loadStoredUser();
     const token = loadAuthToken();
-    
+
     // Only use stored user if we also have a valid JWT token
     // Valid JWTs have format: xxx.yyy.zzz (3 parts separated by dots)
     if (storedUser && token && typeof token === 'string' && token.includes('.')) {
@@ -62,7 +63,7 @@ function App() {
         return storedUser;
       }
     }
-    
+
     // Invalid or missing token - clear session and start fresh at login
     clearSession();
     return null;
@@ -181,61 +182,60 @@ function App() {
     <LanguageProvider>
       <AppContext.Provider value={value}>
         <Routes>
-        <Route path="/" element={<Navigate to={user ? getHomePath(user.role) : "/login"} replace />} />
-        <Route path="/login" element={user ? <Navigate to={getHomePath(user.role)} replace /> : <LoginPage />} />
-        <Route path="/signup" element={user ? <Navigate to={getHomePath(user.role)} replace /> : <SignupPage />} />
+          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
 
-        <Route
-          path="/citizen"
-          element={
-            <ProtectedRoute user={user} allowedRoles={["Citizen"]}>
-              <RoleLayout />
-            </ProtectedRoute>
-          }
-        >
-          <Route index element={<Navigate to="dashboard" replace />} />
-          <Route path="dashboard" element={<CitizenDashboardPage />} />
-          <Route path="profile" element={<ProfilePage />} />
-          <Route path="map" element={<MapPage />} />
-          <Route path="new-complaint" element={<NewComplaintPage />} />
-          <Route path="track" element={<TrackComplaintPage />} />
-          <Route path="track/:complaintId" element={<ComplaintDetailsPage />} />
-          <Route path="resolved" element={<ResolvedComplaintsPage />} />
-        </Route>
+          <Route
+            path="/citizen"
+            element={
+              <ProtectedRoute user={user} allowedRoles={["Citizen"]}>
+                <RoleLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Navigate to="dashboard" replace />} />
+            <Route path="dashboard" element={<CitizenDashboardPage />} />
+            <Route path="profile" element={<ProfilePage />} />
+            <Route path="map" element={<MapPage />} />
+            <Route path="new-complaint" element={<NewComplaintPage />} />          <Route path="ivr" element={<IVRPage />} />            <Route path="track" element={<TrackComplaintPage />} />
+            <Route path="track/:complaintId" element={<ComplaintDetailsPage />} />
+            <Route path="resolved" element={<ResolvedComplaintsPage />} />
+          </Route>
 
-        <Route
-          path="/officer"
-          element={
-            <ProtectedRoute user={user} allowedRoles={["Officer"]}>
-              <RoleLayout />
-            </ProtectedRoute>
-          }
-        >
-          <Route index element={<Navigate to="dashboard" replace />} />
-          <Route path="dashboard" element={<OfficerDashboardPage />} />
-          <Route path="profile" element={<OfficerProfilePage />} />
-          <Route path="assigned" element={<OfficerAssignedComplaintsPage />} />
-          <Route path="proof" element={<OfficerProofUploadPage />} />
-          <Route path="verifications" element={<OfficerPendingVerificationsPage />} />
-        </Route>
+          <Route
+            path="/officer"
+            element={
+              <ProtectedRoute user={user} allowedRoles={["Officer"]}>
+                <RoleLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Navigate to="dashboard" replace />} />
+            <Route path="dashboard" element={<OfficerDashboardPage />} />
+            <Route path="profile" element={<OfficerProfilePage />} />
+            <Route path="assigned" element={<OfficerAssignedComplaintsPage />} />
+            <Route path="proof" element={<OfficerProofUploadPage />} />
+            <Route path="verifications" element={<OfficerPendingVerificationsPage />} />
+          </Route>
 
-        <Route
-          path="/admin"
-          element={
-            <ProtectedRoute user={user} allowedRoles={["Admin"]}>
-              <RoleLayout />
-            </ProtectedRoute>
-          }
-        >
-          <Route index element={<Navigate to="dashboard" replace />} />
-          <Route path="dashboard" element={<AdminDashboardPage />} />
-          <Route path="profile" element={<AdminProfilePage />} />
-          <Route path="analytics" element={<AdminAnalyticsPage />} />
-          <Route path="complaints" element={<AdminComplaintsPage />} />
-        </Route>
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute user={user} allowedRoles={["Admin"]}>
+                <RoleLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Navigate to="dashboard" replace />} />
+            <Route path="dashboard" element={<AdminDashboardPage />} />
+            <Route path="profile" element={<AdminProfilePage />} />
+            <Route path="analytics" element={<AdminAnalyticsPage />} />
+            <Route path="complaints" element={<AdminComplaintsPage />} />
+          </Route>
 
-        <Route path="*" element={<Navigate to={user ? getHomePath(user.role) : "/login"} replace />} />
-      </Routes>
+          <Route path="*" element={<Navigate to={user ? getHomePath(user.role) : "/login"} replace />} />
+        </Routes>
       </AppContext.Provider>
     </LanguageProvider>
   );

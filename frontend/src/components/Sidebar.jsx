@@ -4,9 +4,7 @@ import { NavLink } from "react-router-dom";
 const linksByRole = {
   Citizen: [
     { to: "/citizen/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { to: "/citizen/profile", label: "Profile", icon: UserCircle2 },
     { to: "/citizen/map", label: "View Complaints on Map", icon: MapPinned },
-    { to: "/citizen/new-complaint", label: "New Complaint", icon: PlusCircle },
     { to: "/citizen/track", label: "Track Complaint", icon: ListChecks },
     { to: "/citizen/resolved", label: "Resolved Complaints", icon: FileCheck2 }
   ],
