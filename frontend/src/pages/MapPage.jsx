@@ -6,6 +6,7 @@ import { departments, statusOptions } from "../services/mockData";
 
 const DEFAULT_CENTER = { lat: 28.6139, lng: 77.209 };
 const NEARBY_RADIUS_KM = 3;
+const LOCATION_ACCURACY_TARGET_METERS = 100;
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
 
@@ -56,6 +57,7 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [locationError, setLocationError] = useState("");
+  const [locationAccuracyMeters, setLocationAccuracyMeters] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentLocation, setCurrentLocation] = useState(null);
 
@@ -81,18 +83,73 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
         throw new Error("Geolocation is not supported on this browser.");
       }
 
-      const nextPosition = await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0
-        });
+      const bestFix = await new Promise((resolve, reject) => {
+        let watchId = null;
+        let settled = false;
+        let bestPosition = null;
+
+        const finish = (value, isError = false) => {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          if (watchId !== null) {
+            navigator.geolocation.clearWatch(watchId);
+          }
+
+          if (isError) {
+            reject(value);
+          } else {
+            resolve(value);
+          }
+        };
+
+        const timeoutId = window.setTimeout(() => {
+          if (bestPosition) {
+            finish(bestPosition);
+            return;
+          }
+
+          finish(new Error("Unable to fetch your current location."), true);
+        }, 12000);
+
+        watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            const accuracy = Number(position.coords?.accuracy || Number.POSITIVE_INFINITY);
+            const bestAccuracy = Number(bestPosition?.coords?.accuracy || Number.POSITIVE_INFINITY);
+
+            if (!bestPosition || accuracy < bestAccuracy) {
+              bestPosition = position;
+            }
+
+            if (accuracy <= LOCATION_ACCURACY_TARGET_METERS) {
+              window.clearTimeout(timeoutId);
+              finish(position);
+            }
+          },
+          (error) => {
+            window.clearTimeout(timeoutId);
+            finish(error, true);
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0
+          }
+        );
       });
 
+      const accuracy = Number(bestFix.coords?.accuracy || 0);
+      setLocationAccuracyMeters(Number.isFinite(accuracy) ? Math.round(accuracy) : null);
       setCurrentLocation({
-        lat: Number(nextPosition.coords.latitude),
-        lng: Number(nextPosition.coords.longitude)
+        lat: Number(bestFix.coords.latitude),
+        lng: Number(bestFix.coords.longitude)
       });
+
+      if (Number.isFinite(accuracy) && accuracy > LOCATION_ACCURACY_TARGET_METERS) {
+        setLocationError(`Location accuracy is ~${Math.round(accuracy)}m. Target is <= ${LOCATION_ACCURACY_TARGET_METERS}m.`);
+      }
     } catch (error) {
       setLocationError(error.message || "Unable to fetch your current location.");
     } finally {
@@ -232,6 +289,19 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
   const nearbyWithinRadius = nearbyRows.filter((item) => item.distanceKm <= NEARBY_RADIUS_KM);
   const mapHeightClass = isFullscreen ? "h-screen" : "h-[70vh]";
 
+  const fallbackCenter = mapMarkers[0]
+    ? { lat: mapMarkers[0].lat, lng: mapMarkers[0].lng }
+    : (currentLocation || DEFAULT_CENTER);
+
+  const fallbackBounds = {
+    minLng: (fallbackCenter.lng - 0.02).toFixed(6),
+    minLat: (fallbackCenter.lat - 0.02).toFixed(6),
+    maxLng: (fallbackCenter.lng + 0.02).toFixed(6),
+    maxLat: (fallbackCenter.lat + 0.02).toFixed(6)
+  };
+
+  const openStreetMapEmbedUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${fallbackBounds.minLng}%2C${fallbackBounds.minLat}%2C${fallbackBounds.maxLng}%2C${fallbackBounds.maxLat}&layer=mapnik&marker=${fallbackCenter.lat}%2C${fallbackCenter.lng}`;
+
   const focusComplaintsOnMap = () => {
     if (!mapRef.current || !mapMarkers.length) {
       return;
@@ -272,6 +342,11 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
             You are here: {currentLocation.lat.toFixed(5)}, {currentLocation.lng.toFixed(5)}
           </p>
         ) : null}
+        {locationAccuracyMeters !== null ? (
+          <p className="rounded-full bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700">
+            GPS accuracy: ~{locationAccuracyMeters}m (target {"<="} {LOCATION_ACCURACY_TARGET_METERS}m)
+          </p>
+        ) : null}
         <p className="rounded-full bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700">
           Pending markers: {pendingPlotted}/{pendingTotal}
         </p>
@@ -279,13 +354,13 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
 
       {!GOOGLE_MAPS_API_KEY ? (
         <div className="rounded-3xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
-          Add VITE_GOOGLE_MAPS_API_KEY in frontend/.env to enable Google Maps.
+          Google Maps key is missing. Switching to OpenStreetMap fallback automatically.
         </div>
       ) : null}
 
       {loadError ? (
         <div className="rounded-3xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800">
-          Google Maps failed to load: {loadError.message}. Verify API key, allowed referrers (localhost), and enabled billing.
+          Google Maps failed to load: {loadError.message}. Using OpenStreetMap fallback below.
         </div>
       ) : null}
 
@@ -313,9 +388,15 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
 
       <div className="grid gap-5 xl:grid-cols-[1.5fr_0.9fr]">
         <div ref={mapShellRef} className="relative min-h-[420px] overflow-hidden rounded-[2rem] border border-slate-200 shadow-card">
-          {loadError ? (
-            <div className="flex h-[70vh] items-center justify-center px-6 text-center text-sm text-rose-700">
-              Google Maps failed to load. Check API key restrictions and billing, then restart Vite.
+          {!GOOGLE_MAPS_API_KEY || loadError ? (
+            <div className={mapHeightClass}>
+              <iframe
+                title="OpenStreetMap Fallback"
+                src={openStreetMapEmbedUrl}
+                className="h-full w-full border-0"
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+              />
             </div>
           ) : isLoaded ? (
             <div className={mapHeightClass}>
@@ -391,7 +472,7 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
 
           <div className="pointer-events-none absolute left-4 top-4 rounded-2xl bg-white/90 px-4 py-3 shadow-sm backdrop-blur">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-900"><SlidersHorizontal size={16} /> Live filters active</div>
-            <p className="mt-1 text-xs text-slate-500">Google Maps API with complaint markers</p>
+            <p className="mt-1 text-xs text-slate-500">Complaint markers with automatic map provider fallback</p>
           </div>
           <div className="pointer-events-none absolute bottom-4 right-4 rounded-2xl bg-white/90 px-4 py-3 text-xs font-semibold text-slate-500 shadow-sm backdrop-blur">Click marker to inspect complaint details</div>
         </div>
