@@ -1,0 +1,549 @@
+require("dotenv").config();
+
+const express = require("express");
+const path = require("path");
+const axios = require("axios");
+const twilio = require("twilio");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+
+const app = express();
+const VoiceResponse = twilio.twiml.VoiceResponse;
+
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+const PORT = process.env.PORT || 3000;
+
+const requiredEnvVars = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"];
+
+for (const envVar of requiredEnvVars) {
+  if (!process.env[envVar]) {
+    console.warn(`[WARN] Missing environment variable: ${envVar}`);
+  }
+}
+
+const geminiClient = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
+const geminiEnabled = process.env.ENABLE_GEMINI_TRANSCRIPT === "true";
+const geminiModelCandidates = (process.env.GEMINI_MODEL_CANDIDATES || "gemini-2.5-flash,gemini-2.0-flash")
+  .split(",")
+  .map((modelName) => modelName.trim().replace(/^models\//, ""))
+  .filter(Boolean);
+
+if (geminiEnabled && !geminiClient) {
+  console.warn("[WARN] ENABLE_GEMINI_TRANSCRIPT is true but GEMINI_API_KEY is missing.");
+}
+
+// In-memory complaint store for live dashboard.
+const complaints = [];
+const sseClients = new Set();
+const callLanguageBySid = new Map();
+const promptAudioCache = new Map();
+const languageConfig = {
+  en: {
+    name: "English",
+    sayLanguage: "en-US",
+    ttsLang: "en",
+    prompts: {
+      menu_option: "Press 1 for English.",
+      invalid_language: "Invalid input. Please press 1 for English, 2 for Gujarati, or 3 for Hindi.",
+      start_recording: "Please record your complaint after the beep.",
+      no_recording: "We did not receive your recording. Please try again.",
+      confirmation: "Your complaint has been registered. Thank you for calling.",
+      generic_error: "We are sorry. An application error has occurred. Please try again.",
+      ai_disabled_transcription: "Audio recording captured.",
+      ai_disabled_summary: "AI summary is disabled.",
+      processing_transcription: "Transcription is in progress...",
+      processing_summary: "AI summary is in progress...",
+      ai_unavailable_summary: "AI summary is unavailable.",
+      queued: "Queued for AI processing",
+      completed: "Completed",
+      failedPrefix: "Failed",
+      label_issue_type: "Issue Type",
+      label_priority: "Priority",
+      label_summary: "Summary"
+    }
+  },
+  gu: {
+    name: "Gujarati",
+    sayLanguage: "gu-IN",
+    ttsLang: "gu",
+    prompts: {
+      menu_option: "ગુજરાતી માટે 2 દબાવો.",
+      invalid_language: "અમાન્ય પસંદગી. અંગ્રેજી માટે 1, ગુજરાતી માટે 2, અથવા હિન્દી માટે 3 દબાવો.",
+      start_recording: "કૃપા કરીને તમારી ફરિયાદ રેકોર્ડ કરો.",
+      no_recording: "અમને કોઈ રેકોર્ડિંગ મળ્યું નથી. કૃપા કરીને ફરી પ્રયાસ કરો.",
+      confirmation: "તમારી ફરિયાદ નોંધાઈ ગઈ છે. કોલ કરવા બદલ આભાર.",
+      generic_error: "માફ કરશો, તમારી ફરિયાદ નોંધવામાં સમસ્યા આવી. કૃપા કરીને ફરી પ્રયાસ કરો.",
+      ai_disabled_transcription: "ઓડિયો રેકોર્ડિંગ મળી ગયું છે.",
+      ai_disabled_summary: "AI સારાંશ બંધ છે.",
+      processing_transcription: "ટ્રાન્સક્રિપ્શન પ્રક્રિયામાં છે...",
+      processing_summary: "AI સારાંશ પ્રક્રિયામાં છે...",
+      ai_unavailable_summary: "AI સારાંશ ઉપલબ્ધ નથી.",
+      queued: "AI પ્રક્રિયા માટે કતારમાં",
+      completed: "પૂર્ણ થયું",
+      failedPrefix: "નિષ્ફળ",
+      label_issue_type: "સમસ્યાનો પ્રકાર",
+      label_priority: "પ્રાથમિકતા",
+      label_summary: "સારાંશ"
+    }
+  },
+  hi: {
+    name: "Hindi",
+    sayLanguage: "hi-IN",
+    ttsLang: "hi",
+    prompts: {
+      menu_option: "हिंदी के लिए 3 दबाएं.",
+      invalid_language: "अमान्य विकल्प। अंग्रेज़ी के लिए 1, गुजराती के लिए 2, या हिंदी के लिए 3 दबाएं।",
+      start_recording: "कृपया बीप के बाद अपनी शिकायत रिकॉर्ड करें।",
+      no_recording: "हमें आपकी रिकॉर्डिंग नहीं मिली। कृपया फिर से प्रयास करें।",
+      confirmation: "आपकी शिकायत दर्ज हो गई है। कॉल करने के लिए धन्यवाद।",
+      generic_error: "क्षमा करें, आपकी शिकायत दर्ज करने में समस्या आई। कृपया फिर से प्रयास करें।",
+      ai_disabled_transcription: "ऑडियो रिकॉर्डिंग प्राप्त हो गई है।",
+      ai_disabled_summary: "AI सारांश बंद है।",
+      processing_transcription: "ट्रांसक्रिप्शन प्रक्रिया में है...",
+      processing_summary: "AI सारांश प्रक्रिया में है...",
+      ai_unavailable_summary: "AI सारांश उपलब्ध नहीं है।",
+      queued: "AI प्रोसेसिंग के लिए कतार में",
+      completed: "पूर्ण",
+      failedPrefix: "विफल",
+      label_issue_type: "समस्या प्रकार",
+      label_priority: "प्राथमिकता",
+      label_summary: "सारांश"
+    }
+  }
+};
+
+function getLanguageByDigit(digit) {
+  if (digit === "1") return "en";
+  if (digit === "2") return "gu";
+  if (digit === "3") return "hi";
+  return null;
+}
+
+function getLanguageForRequest(req) {
+  const callSid = req.body.CallSid || req.query.CallSid;
+  if (callSid && callLanguageBySid.has(callSid)) {
+    return callLanguageBySid.get(callSid);
+  }
+  return "gu";
+}
+
+function getPromptText(language, promptKey) {
+  const selected = languageConfig[language] || languageConfig.gu;
+  return selected.prompts[promptKey] || languageConfig.gu.prompts[promptKey] || "";
+}
+
+function playLanguageMenu(twimlNode) {
+  sayPrompt(twimlNode, "en", "menu_option");
+  sayPrompt(twimlNode, "gu", "menu_option");
+  sayPrompt(twimlNode, "hi", "menu_option");
+}
+
+function webhookUrl(routePath) {
+  const baseUrl = process.env.NGROK_BASE_URL;
+  if (!baseUrl) {
+    return routePath;
+  }
+  return `${baseUrl.replace(/\/$/, "")}${routePath}`;
+}
+
+function sayPrompt(twiml, language, promptKey) {
+  const useAudioPrompts = process.env.TWILIO_USE_AUDIO_PROMPTS === "true";
+  const selected = languageConfig[language] || languageConfig.gu;
+  const text = getPromptText(language, promptKey);
+
+  if (useAudioPrompts && promptKey) {
+    twiml.play(webhookUrl(`/tts/prompt/${encodeURIComponent(language)}/${encodeURIComponent(promptKey)}`));
+    return;
+  }
+
+  twiml.say(
+    {
+      language: selected.sayLanguage,
+      voice: "alice"
+    },
+    text
+  );
+}
+
+function broadcastComplaint(complaint) {
+  const payload = `data: ${JSON.stringify({ type: "new-complaint", complaint })}\n\n`;
+  for (const client of sseClients) {
+    client.write(payload);
+  }
+}
+
+function broadcastComplaintUpdate(complaint) {
+  const payload = `data: ${JSON.stringify({ type: "complaint-updated", complaint })}\n\n`;
+  for (const client of sseClients) {
+    client.write(payload);
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function downloadRecordingAudioBuffer(recordingUrl, options = {}) {
+  const retries = options.retries ?? 5;
+  const retryDelayMs = options.retryDelayMs ?? 1200;
+  const downloadUrl = `${recordingUrl}.mp3`;
+
+  let lastError;
+
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    try {
+      const response = await axios.get(downloadUrl, {
+        responseType: "arraybuffer",
+        timeout: 15000,
+        auth: {
+          username: process.env.TWILIO_ACCOUNT_SID,
+          password: process.env.TWILIO_AUTH_TOKEN
+        }
+      });
+
+      return Buffer.from(response.data);
+    } catch (error) {
+      lastError = error;
+      const statusCode = error.response?.status;
+      const canRetry = statusCode === 404 || statusCode === 429 || (statusCode >= 500 && statusCode < 600);
+
+      if (!canRetry || attempt === retries) {
+        break;
+      }
+
+      await sleep(retryDelayMs);
+    }
+  }
+
+  throw lastError;
+}
+
+function parseGeminiJson(text) {
+  const cleaned = text.replace(/```json|```/gi, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch (_error) {
+    return {
+      transcription_text: cleaned,
+      summary_text: cleaned,
+      issue_type: "General",
+      priority: "Medium"
+    };
+  }
+}
+
+async function transcribeAndSummarizeWithGemini(audioBuffer, language) {
+  const selected = languageConfig[language] || languageConfig.gu;
+  if (!geminiClient || !geminiEnabled) {
+    return {
+      transcriptionText: selected.prompts.ai_disabled_transcription,
+      geminiSummary: selected.prompts.ai_disabled_summary
+    };
+  }
+
+  const languageName = selected.name;
+
+  const prompt = [
+    `Transcribe this complaint audio and reply ONLY in ${languageName}.`,
+    "Return JSON only.",
+    "Required JSON keys: transcription_text, summary_text, issue_type, priority.",
+    `transcription_text and summary_text must be in ${languageName}.`,
+    "કોઈ વધારાનો લખાણ, markdown અથવા code block ન આપો."
+  ].join(" ");
+
+  let lastError;
+
+  for (const modelName of geminiModelCandidates) {
+    try {
+      const model = geminiClient.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent([
+        { text: prompt },
+        {
+          inlineData: {
+            mimeType: "audio/mpeg",
+            data: audioBuffer.toString("base64")
+          }
+        }
+      ]);
+
+      const responseText = (await result.response).text().trim();
+      const parsed = parseGeminiJson(responseText);
+
+      return {
+        transcriptionText: parsed.transcription_text || "ટ્રાન્સક્રિપ્શન મળ્યું નથી.",
+        geminiSummary: [
+          `${getPromptText(language, "label_issue_type")}: ${parsed.issue_type || "General"}`,
+          `${getPromptText(language, "label_priority")}: ${parsed.priority || "Medium"}`,
+          `${getPromptText(language, "label_summary")}: ${parsed.summary_text || "No summary generated."}`
+        ].join("\n")
+      };
+    } catch (error) {
+      lastError = error;
+      console.warn(`[WARN] Gemini model failed (${modelName}): ${error.message}`);
+    }
+  }
+
+  throw lastError || new Error("All Gemini model candidates failed.");
+}
+
+async function enrichComplaintWithAi(complaintId) {
+  const complaint = complaints.find((item) => item.id === complaintId);
+  if (!complaint) {
+    return;
+  }
+
+  try {
+    const audioBuffer = await downloadRecordingAudioBuffer(complaint.recordingUrl);
+    const aiResult = await transcribeAndSummarizeWithGemini(audioBuffer, complaint.language);
+
+    complaint.transcriptionText = aiResult.transcriptionText;
+    complaint.geminiSummary = aiResult.geminiSummary;
+    complaint.processingStatus = getPromptText(complaint.language, "completed");
+    broadcastComplaintUpdate(complaint);
+  } catch (error) {
+    complaint.processingStatus = `${getPromptText(complaint.language, "failedPrefix")}: ${error.message}`;
+    complaint.geminiSummary = getPromptText(complaint.language, "ai_unavailable_summary");
+    broadcastComplaintUpdate(complaint);
+    console.error("[ERROR] AI enrichment failed:", error.message);
+  }
+}
+
+app.all("/ivr", (req, res) => {
+  const twiml = new VoiceResponse();
+  const gather = twiml.gather({
+    numDigits: 1,
+    action: webhookUrl("/menu"),
+    method: "POST",
+    timeout: 7
+  });
+
+  playLanguageMenu(gather);
+
+  twiml.redirect({ method: "POST" }, webhookUrl("/ivr"));
+
+  res.type("text/xml");
+  res.send(twiml.toString());
+});
+
+app.all("/menu", (req, res) => {
+  const twiml = new VoiceResponse();
+  const digit = req.body.Digits || req.query.Digits;
+  const language = getLanguageByDigit(digit);
+  const callSid = req.body.CallSid || req.query.CallSid;
+
+  if (language) {
+    if (callSid) {
+      callLanguageBySid.set(callSid, language);
+    }
+    twiml.redirect({ method: "POST" }, webhookUrl("/record"));
+  } else {
+    sayPrompt(twiml, "gu", "invalid_language");
+    playLanguageMenu(twiml);
+    twiml.redirect({ method: "POST" }, webhookUrl("/ivr"));
+  }
+
+  res.type("text/xml");
+  res.send(twiml.toString());
+});
+
+app.all("/record", (req, res) => {
+  const twiml = new VoiceResponse();
+  const language = getLanguageForRequest(req);
+
+  sayPrompt(twiml, language, "start_recording");
+
+  twiml.record({
+    action: webhookUrl("/recording"),
+    method: "POST",
+    maxLength: 60,
+    timeout: Number(process.env.RECORDING_SILENCE_TIMEOUT || 5),
+    playBeep: true,
+    finishOnKey: "#",
+    trim: "trim-silence"
+  });
+
+  sayPrompt(twiml, language, "no_recording");
+  twiml.redirect({ method: "POST" }, webhookUrl("/record"));
+
+  res.type("text/xml");
+  res.send(twiml.toString());
+});
+
+app.all("/recording", (req, res) => {
+  const twiml = new VoiceResponse();
+
+  try {
+    const recordingUrl = req.body.RecordingUrl || req.query.RecordingUrl;
+    const recordingSid = req.body.RecordingSid || req.query.RecordingSid || "Unknown";
+    const recordingDuration = req.body.RecordingDuration || req.query.RecordingDuration || "Unknown";
+    const callerNumber = req.body.From || req.query.From || req.body.Caller || req.query.Caller || "Unknown";
+    const callSid = req.body.CallSid || req.query.CallSid;
+    const language = getLanguageForRequest(req);
+
+    if (!recordingUrl) {
+      throw new Error("RecordingUrl not found in Twilio webhook payload.");
+    }
+
+    const complaint = {
+      id: complaints.length + 1,
+      callerNumber,
+      recordingSid,
+      recordingDuration,
+      recordingUrl,
+      language,
+      transcriptionText: getPromptText(language, "processing_transcription"),
+      geminiSummary: getPromptText(language, "processing_summary"),
+      processingStatus: geminiEnabled ? getPromptText(language, "queued") : "AI disabled",
+      createdAt: new Date().toISOString()
+    };
+
+    complaints.push(complaint);
+    broadcastComplaint(complaint);
+
+    console.log(`[INFO] Complaint saved: ${complaint.id}`);
+    console.log(`[INFO] Caller number: ${callerNumber}`);
+    console.log(`[INFO] Recording URL: ${recordingUrl}`);
+    console.log(`[INFO] Language: ${language}`);
+
+    enrichComplaintWithAi(complaint.id);
+    if (callSid) {
+      callLanguageBySid.delete(callSid);
+    }
+
+    sayPrompt(twiml, language, "confirmation");
+  } catch (error) {
+    console.error("[ERROR] Failed to process complaint:", error.message);
+
+    sayPrompt(twiml, "gu", "generic_error");
+  }
+
+  res.type("text/xml");
+  res.send(twiml.toString());
+});
+
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+app.post("/", (req, res) => {
+  const twiml = new VoiceResponse();
+  twiml.redirect({ method: "POST" }, webhookUrl("/ivr"));
+  res.type("text/xml");
+  res.send(twiml.toString());
+});
+
+app.all("/ivr-response", (req, res) => {
+  const twiml = new VoiceResponse();
+  twiml.redirect({ method: "POST" }, webhookUrl("/ivr"));
+  res.type("text/xml");
+  res.send(twiml.toString());
+});
+
+app.get("/events", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  res.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
+  sseClients.add(res);
+
+  req.on("close", () => {
+    sseClients.delete(res);
+  });
+});
+
+app.get("/status", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    message: "IVR server is running.",
+    mode: geminiEnabled ? "twilio+gemini" : "twilio-only",
+    geminiEnabled: geminiEnabled && Boolean(geminiClient),
+    twilioPhone: process.env.TWILIO_PHONE || "Not configured",
+    twilioWebhook: "/ivr",
+    method: "POST"
+  });
+});
+
+app.get("/complaints", (req, res) => {
+  res.json({ count: complaints.length, complaints });
+});
+
+app.get("/api/complaints", (req, res) => {
+  res.json({ count: complaints.length, complaints });
+});
+
+app.get("/api/recordings/:recordingSid/audio", async (req, res) => {
+  try {
+    const { recordingSid } = req.params;
+    const complaint = complaints.find((item) => item.recordingSid === recordingSid);
+
+    if (!complaint?.recordingUrl) {
+      res.status(404).json({ error: "Recording not found." });
+      return;
+    }
+
+    const response = await axios.get(`${complaint.recordingUrl}.mp3`, {
+      responseType: "stream",
+      timeout: 15000,
+      auth: {
+        username: process.env.TWILIO_ACCOUNT_SID,
+        password: process.env.TWILIO_AUTH_TOKEN
+      }
+    });
+
+    res.setHeader("Content-Type", "audio/mpeg");
+    response.data.pipe(res);
+  } catch (error) {
+    console.error("[ERROR] Unable to stream recording audio:", error.message);
+    res.status(500).json({ error: "Unable to stream recording audio." });
+  }
+});
+
+app.get("/tts/prompt/:language/:promptKey", async (req, res) => {
+  try {
+    const { language, promptKey } = req.params;
+    const selected = languageConfig[language] || languageConfig.gu;
+    const text = getPromptText(language, promptKey);
+    const cacheKey = `${language}:${promptKey}`;
+
+    if (!text) {
+      res.status(404).json({ error: "Prompt not found." });
+      return;
+    }
+
+    if (!promptAudioCache.has(cacheKey)) {
+      const response = await axios.get("https://translate.google.com/translate_tts", {
+        responseType: "arraybuffer",
+        timeout: 15000,
+        params: {
+          ie: "UTF-8",
+          client: "tw-ob",
+          tl: selected.ttsLang,
+          q: text
+        },
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+        }
+      });
+
+      promptAudioCache.set(cacheKey, Buffer.from(response.data));
+    }
+
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(promptAudioCache.get(cacheKey));
+  } catch (error) {
+    console.error("[ERROR] Unable to generate Gujarati prompt audio:", error.message);
+    res.status(500).json({ error: "Unable to generate prompt audio." });
+  }
+});
+
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+app.listen(PORT, () => {
+  console.log(`[INFO] IVR server is running on http://localhost:${PORT}`);
+});

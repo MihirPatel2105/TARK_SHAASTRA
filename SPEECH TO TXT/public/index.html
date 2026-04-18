@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ગુજરાતી IVR ફરિયાદ ડેશબોર્ડ</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #f5f3ed;
+        --panel: #fffdf8;
+        --ink: #1d1d1d;
+        --muted: #66604f;
+        --accent: #0d6b4d;
+        --accent-soft: #cae9de;
+        --warning: #a63a16;
+        --line: #ded8cb;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Space Grotesk", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 88% 7%, #f2d9c1 0%, transparent 34%),
+          radial-gradient(circle at 12% 94%, #d3e8df 0%, transparent 30%),
+          linear-gradient(135deg, #f7f3e9 0%, #ece8dc 100%);
+      }
+
+      .wrap {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 28px 18px 40px;
+      }
+
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(1.4rem, 2.7vw, 2.2rem);
+        letter-spacing: 0.02em;
+      }
+
+      .sub {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        padding: 8px 14px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        font-size: 0.85rem;
+      }
+
+      .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: #909090;
+      }
+
+      .dot.live {
+        background: #127b5a;
+        box-shadow: 0 0 0 6px rgba(18, 123, 90, 0.13);
+        animation: pulse 2.2s ease-out infinite;
+      }
+
+      @keyframes pulse {
+        0% {
+          box-shadow: 0 0 0 0 rgba(18, 123, 90, 0.28);
+        }
+        100% {
+          box-shadow: 0 0 0 10px rgba(18, 123, 90, 0);
+        }
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 12px 14px;
+      }
+
+      .label {
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+
+      .value {
+        margin-top: 6px;
+        font-weight: 600;
+        font-size: 1.2rem;
+      }
+
+      #list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .complaint {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        border-radius: 14px;
+        padding: 14px;
+        transform: translateY(8px);
+        opacity: 0;
+        animation: rise 0.35s ease forwards;
+      }
+
+      @keyframes rise {
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+
+      .top {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 8px;
+      }
+
+      .id {
+        font-family: "IBM Plex Mono", monospace;
+        color: var(--accent);
+        font-size: 0.84rem;
+      }
+
+      .time {
+        font-size: 0.78rem;
+        color: var(--muted);
+      }
+
+      .section-title {
+        margin: 10px 0 4px;
+        font-weight: 600;
+        font-size: 0.88rem;
+      }
+
+      .mono {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.78rem;
+        word-break: break-all;
+      }
+
+      .text {
+        margin: 0;
+        color: #2a2a2a;
+        line-height: 1.45;
+        font-size: 0.93rem;
+        white-space: pre-wrap;
+      }
+
+      .audio-player {
+        width: 100%;
+        margin-top: 6px;
+      }
+
+      .empty {
+        border: 1px dashed var(--line);
+        border-radius: 12px;
+        padding: 20px;
+        color: var(--muted);
+        text-align: center;
+        background: rgba(255, 253, 248, 0.72);
+      }
+
+      .warn {
+        color: var(--warning);
+      }
+
+      @media (max-width: 640px) {
+        .wrap {
+          padding: 16px 12px 26px;
+        }
+
+        .complaint {
+          padding: 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <div class="header">
+        <div>
+          <h1>ગુજરાતી IVR ફરિયાદ ડેશબોર્ડ</h1>
+          <p class="sub">Twilio IVR દ્વારા મળેલ કોલ રેકોર્ડિંગ્સ અને AI વિશ્લેષણનું લાઇવ દર્શન.</p>
+        </div>
+        <div class="pill">
+          <span id="statusDot" class="dot"></span>
+          <span id="statusText">connecting...</span>
+        </div>
+      </div>
+
+      <section class="stats">
+        <article class="card">
+          <div class="label">કુલ ફરિયાદો</div>
+          <div id="totalCount" class="value">0</div>
+        </article>
+        <article class="card">
+          <div class="label">છેલ્લું અપડેટ</div>
+          <div id="lastUpdate" class="value" style="font-size: 0.98rem">-</div>
+        </article>
+      </section>
+
+      <section id="list"></section>
+    </main>
+
+    <script>
+      const listEl = document.getElementById("list");
+      const totalCountEl = document.getElementById("totalCount");
+      const lastUpdateEl = document.getElementById("lastUpdate");
+      const statusDotEl = document.getElementById("statusDot");
+      const statusTextEl = document.getElementById("statusText");
+      const REGISTERED_NUMBER = "9662876737";
+      let twilioPhone = "લોડ થઈ રહ્યું છે...";
+
+      const statsEl = document.querySelector(".stats");
+      const registeredCard = document.createElement("article");
+      registeredCard.className = "card";
+      registeredCard.innerHTML = `
+        <div class="label">રજિસ્ટર્ડ નંબર</div>
+        <div class="value" style="font-size: 1.02rem">${REGISTERED_NUMBER}</div>
+      `;
+      statsEl.appendChild(registeredCard);
+
+      const twilioCard = document.createElement("article");
+      twilioCard.className = "card";
+      twilioCard.innerHTML = `
+        <div class="label">Twilio કોલ નંબર</div>
+        <div id="twilioPhone" class="value" style="font-size: 1.02rem">${twilioPhone}</div>
+      `;
+      statsEl.appendChild(twilioCard);
+
+      let complaints = [];
+
+      function escapeHtml(value) {
+        return String(value || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      }
+
+      function formatTime(iso) {
+        if (!iso) return "-";
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) return "-";
+        return date.toLocaleString();
+      }
+
+      function render() {
+        totalCountEl.textContent = complaints.length;
+        lastUpdateEl.textContent = complaints.length
+          ? formatTime(complaints[0].createdAt)
+          : "-";
+
+        if (!complaints.length) {
+          listEl.innerHTML = '<div class="empty">હજુ સુધી કોઈ ફરિયાદ નથી. કોલ કરો અને 1 દબાવી ફરિયાદ નોંધાવો.</div>';
+          return;
+        }
+
+        listEl.innerHTML = complaints
+          .map(
+            (item) => `
+              <article class="complaint">
+                <div class="top">
+                  <div class="id">ફરિયાદ રેફ: CMP-${String(item.id || 0).padStart(4, "0")}</div>
+                  <div class="time">${escapeHtml(formatTime(item.createdAt))}</div>
+                </div>
+
+                <div class="section-title">ફરિયાદ નંબર</div>
+                <div class="mono">CMP-${String(item.id || 0).padStart(4, "0")}</div>
+
+                <div class="section-title">રેકોર્ડિંગ URL</div>
+                <div class="mono">${escapeHtml(item.recordingUrl || "-")}</div>
+
+                <div class="section-title">ફરિયાદ ઓડિયો</div>
+                ${
+                  item.recordingSid
+                    ? `<audio class="audio-player" controls preload="none" src="/api/recordings/${encodeURIComponent(item.recordingSid)}/audio"></audio>
+                       <div class="mono"><a href="/api/recordings/${encodeURIComponent(item.recordingSid)}/audio" target="_blank" rel="noopener">રેકોર્ડિંગ સીધું ખોલો</a></div>`
+                    : `<p class="text">ઓડિયો ઉપલબ્ધ નથી.</p>`
+                }
+
+                <div class="section-title">કોલર નંબર</div>
+                <div class="mono">${escapeHtml(item.callerNumber || "Unknown")}</div>
+
+                <div class="section-title">પસંદ કરેલી ભાષા</div>
+                <div class="mono">${escapeHtml(item.language || "gu")}</div>
+
+                <div class="section-title">રેકોર્ડિંગ SID</div>
+                <div class="mono">${escapeHtml(item.recordingSid || "-")}</div>
+
+                <div class="section-title">રેકોર્ડિંગ સમય (સેકન્ડ)</div>
+                <div class="mono">${escapeHtml(item.recordingDuration || "-")}</div>
+
+                <div class="section-title">ગુજરાતી ટ્રાન્સક્રિપ્શન</div>
+                <p class="text">${escapeHtml(item.transcriptionText || "-")}</p>
+
+                <div class="section-title">AI સારાંશ</div>
+                <p class="text">${escapeHtml(item.geminiSummary || "-")}</p>
+
+                <div class="section-title">પ્રક્રિયા સ્થિતિ</div>
+                <p class="text">${escapeHtml(item.processingStatus || "-")}</p>
+              </article>
+            `
+          )
+          .join("");
+      }
+
+      async function loadInitial() {
+        try {
+          const response = await fetch("/api/complaints");
+          const data = await response.json();
+          complaints = (data.complaints || []).slice().reverse();
+          render();
+        } catch (error) {
+          listEl.innerHTML = `<div class="empty warn">ફરિયાદ લોડ કરવામાં નિષ્ફળ: ${escapeHtml(error.message)}</div>`;
+        }
+      }
+
+      async function loadStatus() {
+        try {
+          const response = await fetch("/status");
+          const data = await response.json();
+          const twilioPhoneEl = document.getElementById("twilioPhone");
+          twilioPhoneEl.textContent = data.twilioPhone || "સેટ નથી";
+        } catch (_error) {
+          const twilioPhoneEl = document.getElementById("twilioPhone");
+          twilioPhoneEl.textContent = "સેટ નથી";
+        }
+      }
+
+      function setConnectionStatus(isLive) {
+        statusDotEl.className = isLive ? "dot live" : "dot";
+        statusTextEl.textContent = isLive ? "લાઇવ" : "ફરીથી જોડાઈ રહ્યું છે";
+      }
+
+      function startLiveStream() {
+        const source = new EventSource("/events");
+
+        source.onopen = () => setConnectionStatus(true);
+
+        source.onmessage = (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload.type === "new-complaint" && payload.complaint) {
+              complaints.unshift(payload.complaint);
+              render();
+            } else if (payload.type === "complaint-updated" && payload.complaint) {
+              const index = complaints.findIndex((item) => item.id === payload.complaint.id);
+              if (index !== -1) {
+                complaints[index] = payload.complaint;
+                render();
+              }
+            }
+          } catch (_e) {
+            // Ignore malformed stream chunks.
+          }
+        };
+
+        source.onerror = () => {
+          setConnectionStatus(false);
+        };
+      }
+
+      loadStatus();
+      loadInitial();
+      startLiveStream();
+    </script>
+  </body>
+</html>
