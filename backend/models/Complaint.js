@@ -39,13 +39,13 @@ const ComplaintSchema = new Schema(
     },
     source: {
       type: String,
-      enum: ['APP_IMAGE', 'APP_TEXT', 'IVR_CALL'],
+      enum: ['APP_IMAGE', 'APP_TEXT'],
       default: 'APP_IMAGE',
       index: true
     },
     location_status: {
       type: String,
-      enum: ['AVAILABLE', 'MISSING', 'NEEDS_IVR_FOLLOWUP'],
+      enum: ['AVAILABLE', 'MISSING', 'NEEDS_LOCATION'],
       default: 'AVAILABLE',
       index: true
     },
@@ -170,33 +170,6 @@ const ComplaintSchema = new Schema(
         default: null
       }
     },
-    ivr_metadata: {
-      call_sid: {
-        type: String,
-        default: null
-      },
-      recording_url: {
-        type: String,
-        default: null
-      },
-      transcript_text: {
-        type: String,
-        default: null
-      },
-      followup_call_sid: {
-        type: String,
-        default: null
-      },
-      followup_triggered_at: {
-        type: Date,
-        default: null
-      },
-      followup_status: {
-        type: String,
-        enum: ['NOT_REQUIRED', 'PENDING', 'TRIGGERED', 'COLLECTED'],
-        default: 'NOT_REQUIRED'
-      }
-    },
     resolved_image: {
       type: String
     },
@@ -234,10 +207,6 @@ const ComplaintSchema = new Schema(
       default: 0
     },
     photo_uploaded: {
-      type: Number,
-      default: 0
-    },
-    ivr_response: {
       type: Number,
       default: 0
     },

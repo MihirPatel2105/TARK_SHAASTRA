@@ -79,20 +79,6 @@ function complaintMatchesRadius(complaint, lat, lng, radius) {
   return distanceMeters <= radius;
 }
 
-function toLocalIvrComplaint(complaint) {
-  return {
-    id: complaint.id,
-    phone: complaint.citizenPhone || complaint.phone || null,
-    audioUrl: complaint.audioUrl || null,
-    transcript: complaint.source === "IVR_CALL" ? complaint.description || null : null,
-    transcriptStatus: complaint.source === "IVR_CALL" ? "COMPLETED" : "PENDING",
-    transcriptError: null,
-    recordingDurationSec: complaint.recordingDurationSec ?? null,
-    createdAt: complaint.createdAt || null,
-    completedAt: complaint.resolvedAt || null
-  };
-}
-
 function updateLocalComplaint(complaintId, updater) {
   const complaints = loadLocalComplaints();
   const nextComplaints = complaints.map((complaint) => (complaint.id === complaintId ? updater(cloneComplaint(complaint)) : complaint));
@@ -115,7 +101,7 @@ function createLocalComplaintFromPayload(payload) {
     status: "Pending",
     verificationStatus: "Pending",
     source: payload.source || "APP_IMAGE",
-    locationStatus: payload.source === "APP_TEXT" ? "NEEDS_IVR_FOLLOWUP" : "AVAILABLE",
+    locationStatus: payload.source === "APP_TEXT" ? "NEEDS_LOCATION" : "AVAILABLE",
     createdAt,
     resolvedAt: null,
     createdById: payload.created_by || loadStoredUser()?.id || null,
@@ -123,15 +109,16 @@ function createLocalComplaintFromPayload(payload) {
     citizenPhone: payload.citizen_phone || loadStoredUser()?.phone || null,
     assignedOfficerId: payload.assign_officer_id || null,
     assignedToId: payload.assign_officer_id || null,
+    imageUrl: null,
+    resolvedImageUrl: null,
     location: {
       lat: Number(payload.lat || 0),
       lng: Number(payload.lng || 0),
       area: payload.location_text || `${Number(payload.lat || 0).toFixed(5)}, ${Number(payload.lng || 0).toFixed(5)}`
     },
     verification: {
-      ivrResponse: payload.source === "APP_TEXT" ? "No" : "No",
       gpsMatch: true,
-      photoUploaded: payload.source !== "IVR_CALL"
+      photoUploaded: true
     },
     scoring: {
       citizenPointsDelta: 0,
@@ -240,13 +227,14 @@ export function toUiComplaint(complaint) {
     citizenPhone: complaint.citizen_phone || null,
     assignedOfficerId: complaint.assigned_officer || null,
     assignedToId: complaint.assigned_to || null,
+    imageUrl: complaint.image_url || complaint.imageUrl || null,
+    resolvedImageUrl: complaint.resolved_image || complaint.resolvedImageUrl || null,
     location: {
       lat: Number(lat || 0),
       lng: Number(lng || 0),
       area: complaint.location_name || `${Number(lat || 0).toFixed(5)}, ${Number(lng || 0).toFixed(5)}`
     },
     verification: {
-      ivrResponse: Number(complaint.ivr_response) === 2 ? "Yes" : "No",
       gpsMatch: Number(complaint.gps_match_flag) === 1,
       photoUploaded: Number(complaint.photo_uploaded) === 1
     },
@@ -384,7 +372,7 @@ export async function createComplaint(payload) {
   };
 
   if (normalizedPayload.source === "APP_TEXT") {
-    const response = await apiFetch(`${API_BASE_URL}/complaints/ivr`, {
+    const response = await apiFetch(`${API_BASE_URL}/complaints/text`, {
       method: "POST",
       headers: buildAuthHeaders({
         "Content-Type": "application/json"
@@ -604,87 +592,3 @@ export async function verifyAdminComplaint(complaintId, verificationStatus) {
   }
 }
 
-export async function submitIvrResponseForComplaint(complaintId, ivrResponse, transcriptText) {
-  const body = {
-    ivr_response: Number(ivrResponse)
-  };
-
-  if (transcriptText) {
-    body.transcript_text = transcriptText;
-  }
-
-  const response = await apiFetch(`${API_BASE_URL}/complaints/${complaintId}/ivr/response`, {
-    method: "POST",
-    headers: buildAuthHeaders({
-      "Content-Type": "application/json"
-    }),
-    body: JSON.stringify(body)
-  });
-
-  try {
-    const data = await parseResponse(response);
-    return toUiComplaint(data.complaint);
-  } catch (error) {
-    return fallbackIfServerError(error, updateLocalComplaint(complaintId, (complaint) => ({
-      ...complaint,
-      verification: { ...(complaint.verification || {}), ivrResponse: Number(ivrResponse) === 2 ? "Yes" : "No" },
-      timeline: [...(complaint.timeline || []), { label: `IVR Response: ${Number(ivrResponse) === 2 ? "Yes" : "No"}`, date: new Date().toISOString().slice(0, 10) }]
-    })));
-  }
-}
-
-function toUiIvrComplaint(complaint) {
-  const createdAt = complaint.created_at ? new Date(complaint.created_at).toISOString() : null;
-  const completedAt = complaint.transcription_completed_at ? new Date(complaint.transcription_completed_at).toISOString() : null;
-
-  return {
-    id: complaint._id,
-    phone: complaint.phone,
-    audioUrl: complaint.audio_url,
-    transcript: complaint.transcript || null,
-    transcriptStatus: complaint.transcript_status || 'PENDING',
-    transcriptError: complaint.transcript_error || null,
-    recordingDurationSec: complaint.recording_duration_sec ?? null,
-    createdAt,
-    completedAt
-  };
-}
-
-export async function fetchIvrComplaints({ status, page = 1, limit = 10 } = {}) {
-  const params = new URLSearchParams({
-    page: String(page),
-    limit: String(limit)
-  });
-
-  if (status) {
-    params.set('status', status);
-  }
-
-  const response = await apiFetch(`${API_BASE_URL}/ivr/complaints?${params.toString()}`, {
-    headers: buildAuthHeaders()
-  });
-
-  try {
-    const data = await parseResponse(response);
-
-    return {
-      total: Number(data.total || 0),
-      page: Number(data.page || page),
-      limit: Number(data.limit || limit),
-      complaints: (data.complaints || []).map(toUiIvrComplaint)
-    };
-  } catch (error) {
-    return fallbackIfServerError(error, (() => {
-      const complaints = loadLocalComplaints()
-        .filter((complaint) => complaint.source === "IVR_CALL")
-        .map(toLocalIvrComplaint);
-
-      return {
-        total: complaints.length,
-        page,
-        limit,
-        complaints: complaints.slice(0, limit)
-      };
-    })());
-  }
-}

@@ -243,8 +243,7 @@ const createComplaint = asyncHandler(async (req, res) => {
     verification_status: 'PENDING',
     reopen_flag: 0,
     gps_match_flag: gpsMatchFlag,
-    photo_uploaded: 1,
-    ivr_response: 0
+    photo_uploaded: 1
   });
 
   res.status(201).json({
@@ -328,10 +327,7 @@ const getMyComplaints = asyncHandler(async (req, res) => {
 
 const getNeedsLocationComplaints = asyncHandler(async (_req, res) => {
   const complaints = await Complaint.find({
-    $or: [
-      { location_status: 'NEEDS_IVR_FOLLOWUP' },
-      { source: { $in: ['IVR_CALL', 'APP_TEXT'] }, location_status: 'MISSING' }
-    ]
+    location_status: { $in: ['NEEDS_LOCATION', 'MISSING'] }
   })
     .sort({ created_at: -1 })
     .lean();
@@ -342,7 +338,7 @@ const getNeedsLocationComplaints = asyncHandler(async (_req, res) => {
   });
 });
 
-const createIvrComplaint = asyncHandler(async (req, res) => {
+const createTextComplaint = asyncHandler(async (req, res) => {
   const {
     grievance_id,
     title,
@@ -379,7 +375,7 @@ const createIvrComplaint = asyncHandler(async (req, res) => {
     location: point,
     user_location: point,
     image_location: point,
-    location_status: location_text ? 'AVAILABLE' : 'NEEDS_IVR_FOLLOWUP',
+    location_status: location_text ? 'AVAILABLE' : 'NEEDS_LOCATION',
     location_text: location_text || null,
     citizen_phone: citizen_phone || null,
     created_by: mongoose.Types.ObjectId.isValid(created_by)
@@ -388,11 +384,7 @@ const createIvrComplaint = asyncHandler(async (req, res) => {
     verification_status: 'PENDING',
     reopen_flag: 0,
     photo_uploaded: 0,
-    gps_match_flag: 0,
-    ivr_response: 0,
-    ivr_metadata: {
-      followup_status: location_text ? 'NOT_REQUIRED' : 'PENDING'
-    }
+    gps_match_flag: 0
   });
 
   res.status(201).json({
@@ -401,29 +393,7 @@ const createIvrComplaint = asyncHandler(async (req, res) => {
   });
 });
 
-const triggerLocationFollowupIvr = asyncHandler(async (req, res) => {
-  const complaint = await Complaint.findById(req.params.id);
-  if (!complaint) {
-    res.status(404);
-    throw new Error('Complaint not found');
-  }
-
-  complaint.location_status = 'NEEDS_IVR_FOLLOWUP';
-  complaint.ivr_metadata = {
-    ...(complaint.ivr_metadata || {}),
-    followup_triggered_at: new Date(),
-    followup_status: 'TRIGGERED'
-  };
-
-  await complaint.save();
-
-  res.json({
-    message: 'Location follow-up IVR triggered',
-    complaint: serializeComplaint(complaint.toObject())
-  });
-});
-
-const ingestIvrLocationUpdate = asyncHandler(async (req, res) => {
+const ingestLocationUpdate = asyncHandler(async (req, res) => {
   const complaint = await Complaint.findById(req.params.id);
   if (!complaint) {
     res.status(404);
@@ -442,38 +412,11 @@ const ingestIvrLocationUpdate = asyncHandler(async (req, res) => {
   complaint.user_location = complaint.user_location || complaint.location;
   complaint.location_status = 'AVAILABLE';
   complaint.location_text = req.body.location_text || complaint.location_text;
-  complaint.ivr_metadata = {
-    ...(complaint.ivr_metadata || {}),
-    followup_status: 'COLLECTED'
-  };
 
   await complaint.save();
 
   res.json({
-    message: 'IVR location ingested successfully',
-    complaint: serializeComplaint(complaint.toObject())
-  });
-});
-
-const ingestIvrVerificationResponse = asyncHandler(async (req, res) => {
-  const complaint = await Complaint.findById(req.params.id);
-  if (!complaint) {
-    res.status(404);
-    throw new Error('Complaint not found');
-  }
-
-  const ivrResponse = parseNumber(req.body.ivr_response, complaint.ivr_response);
-
-  complaint.ivr_response = ivrResponse;
-  complaint.ivr_metadata = {
-    ...(complaint.ivr_metadata || {}),
-    transcript_text: req.body.transcript_text || complaint.ivr_metadata?.transcript_text || null
-  };
-
-  await complaint.save();
-
-  res.json({
-    message: 'IVR response updated',
+    message: 'Location updated successfully',
     complaint: serializeComplaint(complaint.toObject())
   });
 });
@@ -525,7 +468,7 @@ const voteOnComplaint = asyncHandler(async (req, res) => {
 });
 
 const resolveComplaint = asyncHandler(async (req, res) => {
-  const { officerId, ivr_response, gps_match_flag, photo_uploaded } = req.body;
+  const { officerId, gps_match_flag, photo_uploaded } = req.body;
 
   if (!mongoose.Types.ObjectId.isValid(officerId)) {
     res.status(400);
@@ -547,10 +490,9 @@ const resolveComplaint = asyncHandler(async (req, res) => {
   }
 
   complaint.assigned_officer = officerId;
-  complaint.ivr_response = parseNumber(ivr_response, complaint.ivr_response);
   complaint.gps_match_flag = parseNumber(gps_match_flag, complaint.gps_match_flag);
   complaint.photo_uploaded = parseNumber(photo_uploaded, req.file ? 1 : complaint.photo_uploaded);
-  complaint.status = complaint.ivr_response === 2 || complaint.gps_match_flag === 0 || complaint.photo_uploaded === 0 ? 'REOPENED' : 'VERIFIED';
+  complaint.status = complaint.gps_match_flag === 0 || complaint.photo_uploaded === 0 ? 'REOPENED' : 'VERIFIED';
   complaint.verification_status = complaint.status === 'VERIFIED' ? 'VERIFIED' : 'REOPENED';
   complaint.reopen_flag = complaint.status === 'REOPENED' ? 1 : 0;
   complaint.resolved_at = new Date();
@@ -787,15 +729,13 @@ const registerUser = asyncHandler(async (req, res) => {
 
 module.exports = {
   createComplaint,
-  createIvrComplaint,
+  createTextComplaint,
   getNearbyComplaints,
   getMyComplaints,
   getNeedsLocationComplaints,
   getComplaintById,
   voteOnComplaint,
-  triggerLocationFollowupIvr,
-  ingestIvrLocationUpdate,
-  ingestIvrVerificationResponse,
+  ingestLocationUpdate,
   resolveComplaint,
   getOfficerComplaints,
   startComplaintWork,

@@ -59,6 +59,29 @@ function OfficerAssignedComplaintsPage() {
               <StatusBadge status={complaint.status} />
             </div>
             <p className="mt-3 text-sm leading-7 text-slate-600">{complaint.description}</p>
+
+            {complaint.imageUrl ? (
+              <div className="mt-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Citizen Uploaded Image</p>
+                <img
+                  src={complaint.imageUrl}
+                  alt={`Complaint evidence for ${complaint.title}`}
+                  className="max-h-56 w-full rounded-2xl border border-slate-200 object-cover"
+                />
+              </div>
+            ) : null}
+
+            {complaint.resolvedImageUrl ? (
+              <div className="mt-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Officer Resolution Image</p>
+                <img
+                  src={complaint.resolvedImageUrl}
+                  alt={`Resolution evidence for ${complaint.title}`}
+                  className="max-h-56 w-full rounded-2xl border border-slate-200 object-cover"
+                />
+              </div>
+            ) : null}
+
             <div className="mt-4 flex flex-wrap gap-3">
               <button
                 type="button"

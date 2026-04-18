@@ -11,11 +11,8 @@ const Flag = ({ label, ok }) => (
 );
 
 function VerificationIndicator({ verification }) {
-  const ivrYes = verification?.ivrResponse === "Yes";
-
   return (
-    <div className="grid gap-3 sm:grid-cols-3">
-      <Flag label="IVR Response" ok={ivrYes} />
+    <div className="grid gap-3 sm:grid-cols-2">
       <Flag label="GPS Match" ok={Boolean(verification?.gpsMatch)} />
       <Flag label="Photo Uploaded" ok={Boolean(verification?.photoUploaded)} />
     </div>

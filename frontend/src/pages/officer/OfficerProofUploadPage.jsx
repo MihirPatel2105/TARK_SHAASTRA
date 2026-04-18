@@ -28,6 +28,11 @@ function OfficerProofUploadPage() {
     });
   }, [officerCases]);
 
+  const selectedComplaint = useMemo(
+    () => officerCases.find((item) => item.id === complaintId) || null,
+    [officerCases, complaintId]
+  );
+
   const submit = async () => {
     if (!complaintId || !photo || !gps) {
       setMessage("Select a complaint, attach a photo, and capture GPS before submitting.");
@@ -103,6 +108,21 @@ function OfficerProofUploadPage() {
             {photo ? photo.name : "Upload photo proof"}
           </label>
         </div>
+
+        {selectedComplaint ? (
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Selected Complaint</p>
+            <h3 className="mt-2 text-lg font-semibold text-slate-900">{selectedComplaint.title}</h3>
+            <p className="mt-2 text-sm leading-7 text-slate-700">{selectedComplaint.description}</p>
+            {selectedComplaint.imageUrl ? (
+              <img
+                src={selectedComplaint.imageUrl}
+                alt={`Uploaded by citizen: ${selectedComplaint.title}`}
+                className="mt-3 max-h-64 w-full rounded-2xl border border-slate-200 object-cover"
+              />
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
           <input value={gps} readOnly placeholder="GPS location" className="rounded-2xl border border-slate-300 px-4 py-3 text-slate-900" />

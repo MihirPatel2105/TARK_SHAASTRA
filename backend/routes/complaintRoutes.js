@@ -12,11 +12,9 @@ router.get('/needs-location', complaintController.getNeedsLocationComplaints);
 router.get('/analytics', complaintController.analytics);
 router.get('/:id', complaintController.getComplaintById);
 router.post('/', protect, upload.single('image'), complaintController.createComplaint);
-router.post('/ivr', protect, complaintController.createIvrComplaint);
+router.post('/text', protect, complaintController.createTextComplaint);
 router.post('/:id/vote', complaintController.voteOnComplaint);
-router.post('/:id/trigger-location-ivr', complaintController.triggerLocationFollowupIvr);
-router.post('/:id/ivr/location', complaintController.ingestIvrLocationUpdate);
-router.post('/:id/ivr/response', complaintController.ingestIvrVerificationResponse);
+router.post('/:id/location', protect, complaintController.ingestLocationUpdate);
 router.post('/:id/resolve', upload.single('image'), complaintController.resolveComplaint);
 
 module.exports = router;

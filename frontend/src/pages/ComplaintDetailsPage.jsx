@@ -54,6 +54,37 @@ function ComplaintDetailsPage() {
       </div>
 
       <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-card">
+        <h3 className="text-lg font-semibold text-slate-900">Evidence Images</h3>
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 p-4">
+            <p className="text-sm font-semibold text-slate-900">Your Uploaded Image</p>
+            {complaint.imageUrl ? (
+              <img
+                src={complaint.imageUrl}
+                alt={`Uploaded by citizen for ${complaint.title}`}
+                className="mt-3 max-h-72 w-full rounded-xl object-cover"
+              />
+            ) : (
+              <p className="mt-3 text-sm text-slate-500">No citizen image available.</p>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 p-4">
+            <p className="text-sm font-semibold text-slate-900">Officer Resolution Image</p>
+            {complaint.resolvedImageUrl ? (
+              <img
+                src={complaint.resolvedImageUrl}
+                alt={`Resolution uploaded by officer for ${complaint.title}`}
+                className="mt-3 max-h-72 w-full rounded-xl object-cover"
+              />
+            ) : (
+              <p className="mt-3 text-sm text-slate-500">Resolution image not uploaded yet.</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-card">
         <h3 className="text-lg font-semibold text-slate-900">Complaint Timeline</h3>
         <Timeline items={complaint.timeline} />
       </div>

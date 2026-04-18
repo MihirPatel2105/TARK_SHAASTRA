@@ -151,7 +151,6 @@ function toCSVRows(items) {
     'location_status',
     'reopen_flag',
     'gps_match_flag',
-    'ivr_response',
     'votes',
     'citizen_points_delta',
     'department_points_delta',
@@ -184,7 +183,6 @@ function toCSVRows(items) {
     item.location_status,
     item.reopen_flag,
     item.gps_match_flag,
-    item.ivr_response,
     item.votes,
     item.scoring?.citizen_points_delta,
     item.scoring?.department_points_delta,
@@ -398,17 +396,13 @@ const getAdminDashboard = asyncHandler(async (req, res) => {
   const reopenRate = base.total === 0 ? 0 : Number(((base.reopened / base.total) * 100).toFixed(2));
 
   const [
-    ivr2Count,
     gpsMismatchCount,
     noPhotoCount,
-    ivr2AndFailedCount,
     gpsMismatchAndFailedCount,
     noPhotoAndReopenedCount
   ] = await Promise.all([
-    Complaint.countDocuments({ ...filter, ivr_response: 2 }),
     Complaint.countDocuments({ ...filter, gps_match_flag: 0 }),
     Complaint.countDocuments({ ...filter, photo_uploaded: 0 }),
-    Complaint.countDocuments({ ...filter, ivr_response: 2, verification_status: 'FAILED' }),
     Complaint.countDocuments({ ...filter, gps_match_flag: 0, verification_status: 'FAILED' }),
     Complaint.countDocuments({ ...filter, photo_uploaded: 0, verification_status: 'REOPENED' })
   ]);
@@ -431,11 +425,6 @@ const getAdminDashboard = asyncHandler(async (req, res) => {
     trend: monthlyTrend.map((item) => ({ year: item._id.year, month: item._id.month, count: item.count })),
     heatmap: heatmap.map((item) => ({ lng: item._id.lng, lat: item._id.lat, count: item.count })),
     insights: {
-      ivr_response_2: {
-        count: ivr2Count,
-        percent_of_total: safePercent(ivr2Count, base.total),
-        percent_failed_with_ivr2: safePercent(ivr2AndFailedCount, base.failed)
-      },
       gps_mismatch: {
         count: gpsMismatchCount,
         percent_of_total: safePercent(gpsMismatchCount, base.total),
@@ -465,7 +454,7 @@ const verifyAdminComplaint = asyncHandler(async (req, res) => {
 
   let verificationStatus = requestedStatus;
   if (!verificationStatus) {
-    if (complaint.ivr_response === 2 || complaint.gps_match_flag === 0 || complaint.photo_uploaded === 0) {
+    if (complaint.gps_match_flag === 0 || complaint.photo_uploaded === 0) {
       verificationStatus = complaint.photo_uploaded === 0 ? 'REOPENED' : 'FAILED';
     } else {
       verificationStatus = 'VERIFIED';

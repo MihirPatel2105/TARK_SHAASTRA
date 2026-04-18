@@ -1,15 +1,13 @@
 import { useContext, useMemo, useState } from "react";
 import { AppContext } from "../../App";
-import Modal from "../../components/Modal";
 import StatusBadge from "../../components/StatusBadge";
 import Timeline from "../../components/Timeline";
 import VerificationIndicator from "../../components/VerificationIndicator";
-import { submitIvrResponseForComplaint, verifyAdminComplaint } from "../../services/backendApi";
+import { verifyAdminComplaint } from "../../services/backendApi";
 
 function AdminComplaintsPage() {
   const { complaints, refreshComplaints } = useContext(AppContext);
   const [selectedId, setSelectedId] = useState(complaints[0]?.id || "");
-  const [showIvr, setShowIvr] = useState(false);
   const [sourceFilter, setSourceFilter] = useState("ALL");
   const [locationFilter, setLocationFilter] = useState("ALL");
   const [actionError, setActionError] = useState("");
@@ -27,22 +25,6 @@ function AdminComplaintsPage() {
     () => filteredComplaints.find((item) => item.id === selectedId) || filteredComplaints[0],
     [filteredComplaints, selectedId]
   );
-
-  const handleIvr = async (ivrResponse) => {
-    if (!selected?.id) {
-      return;
-    }
-
-    setActionError("");
-
-    try {
-      await submitIvrResponseForComplaint(selected.id, ivrResponse === "Yes" ? 1 : 2, `Admin simulated IVR: ${ivrResponse}`);
-      await refreshComplaints();
-      setShowIvr(false);
-    } catch (error) {
-      setActionError(error.message || "Unable to submit IVR response.");
-    }
-  };
 
   const applyVerificationDecision = async (status) => {
     if (!selected?.id) {
@@ -64,7 +46,7 @@ function AdminComplaintsPage() {
       <div>
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Admin Workspace</p>
         <h2 className="mt-2 text-3xl font-bold text-slate-900">Complaint Table</h2>
-        <p className="mt-2 text-sm leading-7 text-slate-600">Click a row to inspect verification details, timeline, and IVR status.</p>
+        <p className="mt-2 text-sm leading-7 text-slate-600">Click a row to inspect verification details and complaint timeline.</p>
       </div>
 
       <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-card sm:grid-cols-2">
@@ -74,7 +56,6 @@ function AdminComplaintsPage() {
             <option value="ALL">All</option>
             <option value="APP_IMAGE">APP_IMAGE</option>
             <option value="APP_TEXT">APP_TEXT</option>
-            <option value="IVR_CALL">IVR_CALL</option>
           </select>
         </label>
 
@@ -84,7 +65,7 @@ function AdminComplaintsPage() {
             <option value="ALL">All</option>
             <option value="AVAILABLE">AVAILABLE</option>
             <option value="MISSING">MISSING</option>
-            <option value="NEEDS_IVR_FOLLOWUP">NEEDS_IVR_FOLLOWUP</option>
+            <option value="NEEDS_LOCATION">NEEDS_LOCATION</option>
           </select>
         </label>
       </div>
@@ -99,7 +80,6 @@ function AdminComplaintsPage() {
                 <th className="px-4 py-4 font-semibold">Source</th>
                 <th className="px-4 py-4 font-semibold">Department</th>
                 <th className="px-4 py-4 font-semibold">Location Status</th>
-                <th className="px-4 py-4 font-semibold">IVR</th>
                 <th className="px-4 py-4 font-semibold">GPS</th>
                 <th className="px-4 py-4 font-semibold">Photo</th>
                 <th className="px-4 py-4 font-semibold">Final Status</th>
@@ -113,7 +93,6 @@ function AdminComplaintsPage() {
                   <td className="px-4 py-4 text-slate-600">{complaint.source || "APP_TEXT"}</td>
                   <td className="px-4 py-4 text-slate-600">{complaint.department}</td>
                   <td className="px-4 py-4 text-slate-600">{complaint.locationStatus || "AVAILABLE"}</td>
-                  <td className="px-4 py-4 text-slate-600">{complaint.verification?.ivrResponse || "No"}</td>
                   <td className="px-4 py-4 text-slate-600">{complaint.verification?.gpsMatch ? "✔" : "✖"}</td>
                   <td className="px-4 py-4 text-slate-600">{complaint.verification?.photoUploaded ? "✔" : "✖"}</td>
                   <td className="px-4 py-4"><StatusBadge status={complaint.status} /></td>
@@ -140,7 +119,6 @@ function AdminComplaintsPage() {
                 <p className="text-sm font-semibold text-slate-900">Verification Details</p>
                 <p className="mt-2 text-sm text-slate-600">Source: {selected.source || "APP_TEXT"}</p>
                 <p className="text-sm text-slate-600">Location status: {selected.locationStatus || "AVAILABLE"}</p>
-                <p className="mt-2 text-sm text-slate-600">IVR response: {selected.verification?.ivrResponse || "No"}</p>
                 <p className="text-sm text-slate-600">GPS match: {selected.verification?.gpsMatch ? "Yes" : "No"}</p>
                 <p className="text-sm text-slate-600">Photo proof: {selected.verification?.photoUploaded ? "Yes" : "No"}</p>
                 <p className="mt-2 text-sm text-slate-600">Citizen points delta: {selected.scoring?.citizenPointsDelta ?? 0}</p>
@@ -152,8 +130,6 @@ function AdminComplaintsPage() {
                 <h4 className="text-lg font-semibold text-slate-900">Timeline</h4>
                 <Timeline items={selected.timeline || []} />
               </div>
-
-              <button type="button" onClick={() => setShowIvr(true)} className="rounded-2xl bg-blue-700 px-5 py-3 font-semibold text-white shadow-lg shadow-blue-700/20">Launch IVR Simulation</button>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={() => applyVerificationDecision("VERIFIED")} className="rounded-2xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Mark Verified</button>
                 <button type="button" onClick={() => applyVerificationDecision("REOPENED")} className="rounded-2xl bg-amber-700 px-4 py-2 text-sm font-semibold text-white">Mark Reopened</button>
@@ -164,14 +140,6 @@ function AdminComplaintsPage() {
           ) : null}
         </aside>
       </div>
-
-      <Modal open={showIvr} title="IVR Simulation" onClose={() => setShowIvr(false)}>
-        <p className="text-sm leading-7 text-slate-600">Is your complaint resolved?</p>
-        <div className="mt-4 flex flex-wrap gap-3">
-          <button type="button" onClick={() => handleIvr("Yes")} className="rounded-2xl bg-emerald-700 px-5 py-3 font-semibold text-white">Yes</button>
-          <button type="button" onClick={() => handleIvr("No")} className="rounded-2xl bg-rose-700 px-5 py-3 font-semibold text-white">No</button>
-        </div>
-      </Modal>
     </section>
   );
 }

@@ -1,57 +1,28 @@
 import { LocateFixed, PhoneCall, RefreshCcw } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { fetchOfficerNeedsLocationComplaints, triggerOfficerLocationFollowup } from "../../services/backendApi";
+import { useContext, useMemo, useState } from "react";
+import { AppContext } from "../../App";
 
 function OfficerNeedsLocationPage() {
-  const [rows, setRows] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { complaints } = useContext(AppContext);
   const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [workingId, setWorkingId] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const loadRows = async () => {
-    setError("");
-    setIsLoading(true);
+  const rows = useMemo(
+    () => complaints.filter((item) => item.locationStatus === "NEEDS_LOCATION" || item.locationStatus === "MISSING"),
+    [complaints]
+  );
 
-    try {
-      const data = await fetchOfficerNeedsLocationComplaints();
-      setRows(data);
-    } catch (loadError) {
-      setError(loadError.message || "Failed to load missing-location complaints.");
-    } finally {
-      setIsLoading(false);
-    }
+  const refreshRows = () => {
+    setMessage("Refresh the dashboard or assigned queues to see the latest locations.");
   };
-
-  useEffect(() => {
-    loadRows();
-  }, []);
-
-  const triggerFollowup = async (complaintId) => {
-    setMessage("");
-    setError("");
-    setWorkingId(complaintId);
-
-    try {
-      const updated = await triggerOfficerLocationFollowup(complaintId);
-      setRows((previous) => previous.map((item) => (item.id === updated.id ? updated : item)));
-      setMessage("IVR follow-up triggered for location collection.");
-    } catch (triggerError) {
-      setError(triggerError.message || "Unable to trigger location follow-up IVR.");
-    } finally {
-      setWorkingId(null);
-    }
-  };
-
-  const ivrCount = useMemo(() => rows.filter((item) => item.source === "IVR_CALL").length, [rows]);
 
   return (
     <section className="space-y-6">
       <div>
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Officer Workspace</p>
-        <h2 className="mt-2 text-3xl font-bold text-slate-900">Needs Location / IVR Queue</h2>
+        <h2 className="mt-2 text-3xl font-bold text-slate-900">Needs Location Queue</h2>
         <p className="mt-2 text-sm leading-7 text-slate-600">
-          Complaints missing coordinates are queued here. Trigger IVR follow-up to collect location and continue assignment.
+          Complaints missing coordinates are queued here until a location is added.
         </p>
       </div>
 
@@ -61,14 +32,10 @@ function OfficerNeedsLocationPage() {
           <p className="mt-2 text-3xl font-bold text-slate-900">{rows.length}</p>
         </article>
         <article className="rounded-3xl border border-slate-200 bg-white p-4 shadow-card">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">IVR Source</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">{ivrCount}</p>
-        </article>
-        <article className="rounded-3xl border border-slate-200 bg-white p-4 shadow-card">
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Action</p>
           <button
             type="button"
-            onClick={loadRows}
+            onClick={refreshRows}
             disabled={isLoading}
             className="mt-2 inline-flex items-center gap-2 rounded-2xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
           >
@@ -79,12 +46,10 @@ function OfficerNeedsLocationPage() {
       </div>
 
       {message ? <p className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</p> : null}
-      {error ? <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
+      {message ? <p className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</p> : null}
 
       <div className="grid gap-4">
-        {isLoading ? (
-          <article className="rounded-3xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-card">Loading queue...</article>
-        ) : rows.length === 0 ? (
+        {rows.length === 0 ? (
           <article className="rounded-3xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-card">No complaints are waiting for location.</article>
         ) : (
           rows.map((complaint) => (
@@ -101,9 +66,6 @@ function OfficerNeedsLocationPage() {
               </div>
 
               <p className="mt-3 text-sm text-slate-700">{complaint.description}</p>
-              {complaint.transcriptText ? (
-                <p className="mt-2 rounded-2xl bg-slate-50 px-3 py-2 text-xs text-slate-600">Transcript: {complaint.transcriptText}</p>
-              ) : null}
 
               <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-slate-600">
                 <span className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
@@ -118,16 +80,6 @@ function OfficerNeedsLocationPage() {
                 ) : null}
               </div>
 
-              <div className="mt-4">
-                <button
-                  type="button"
-                  onClick={() => triggerFollowup(complaint.id)}
-                  disabled={workingId === complaint.id}
-                  className="rounded-2xl bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white"
-                >
-                  {workingId === complaint.id ? "Triggering..." : "Trigger IVR For Location"}
-                </button>
-              </div>
             </article>
           ))
         )}
