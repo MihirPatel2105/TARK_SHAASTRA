@@ -8,7 +8,9 @@ function uploadBufferToCloudinary(buffer, options = {}) {
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder: options.folder || 'complaints',
-        resource_type: 'image'
+        resource_type: options.resourceType || 'image',
+        format: options.format,
+        public_id: options.publicId
       },
       (error, result) => {
         if (error) {

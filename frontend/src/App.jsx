@@ -1,7 +1,7 @@
 import { createContext, useCallback, useMemo, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import RoleLayout from "./components/layout/RoleLayout";
-import { clearSession, getHomePath, loadStoredUser, normalizeRole, saveSession } from "./services/authStore";
+import { clearSession, getHomePath, normalizeRole, saveSession } from "./services/authStore";
 import { fetchNearbyComplaints } from "./services/backendApi";
 import LoginPage from "./pages/auth/LoginPage";
 import SignupPage from "./pages/auth/SignupPage";
@@ -45,7 +45,7 @@ const ProtectedRoute = ({ user, allowedRoles, children }) => {
 };
 
 function App() {
-  const [user, setUser] = useState(() => loadStoredUser());
+  const [user, setUser] = useState(null);
   const [complaints, setComplaints] = useState(() => loadLocal(COMPLAINTS_KEY, []));
 
   const persistComplaints = useCallback((nextComplaintsOrUpdater) => {

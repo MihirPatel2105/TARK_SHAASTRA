@@ -6,6 +6,45 @@ import { departments } from "../services/mockData";
 
 const initialForm = { title: "", description: "", department: departments[0], location: "", image: null };
 
+const LOCATION_ERROR_TEXT = "Location must be in 'lat, lng' format (example: 22.69050, 72.86175) or DMS format (example: 22°41'25.8\"N 72°51'42.3\"E).";
+
+const dmsToDecimal = (degrees, minutes, seconds, direction) => {
+  const base = Number(degrees) + Number(minutes) / 60 + Number(seconds) / 3600;
+  const sign = direction === "S" || direction === "W" ? -1 : 1;
+  return Number((base * sign).toFixed(6));
+};
+
+const parseLocationInput = (locationText) => {
+  if (!locationText?.trim()) {
+    return null;
+  }
+
+  const normalized = locationText.trim();
+
+  // Accept decimal coordinates such as "22.69050, 72.86175"
+  const decimalMatch = normalized.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (decimalMatch) {
+    const lat = Number(decimalMatch[1]);
+    const lng = Number(decimalMatch[2]);
+    if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+      return { lat, lng };
+    }
+  }
+
+  // Accept DMS coordinates such as 22°41'25.8"N 72°51'42.3"E
+  const dmsMatch = normalized
+    .toUpperCase()
+    .match(/(\d{1,3})\D+(\d{1,2})\D+(\d{1,2}(?:\.\d+)?)\D*([NS])\D+(\d{1,3})\D+(\d{1,2})\D+(\d{1,2}(?:\.\d+)?)\D*([EW])/);
+
+  if (dmsMatch) {
+    const lat = dmsToDecimal(dmsMatch[1], dmsMatch[2], dmsMatch[3], dmsMatch[4]);
+    const lng = dmsToDecimal(dmsMatch[5], dmsMatch[6], dmsMatch[7], dmsMatch[8]);
+    return { lat, lng };
+  }
+
+  return null;
+};
+
 function NewComplaintPage() {
   const { addComplaint, user } = useContext(AppContext);
   const [step, setStep] = useState(1);
@@ -13,6 +52,7 @@ function NewComplaintPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
 
   const [preview, setPreview] = useState("");
 
@@ -39,12 +79,32 @@ function NewComplaintPage() {
       setError("Geolocation is not supported in your browser.");
       return;
     }
+
+    setIsLocating(true);
+
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
         setField("location", `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
+        setIsLocating(false);
       },
-      () => setError("Unable to fetch your location. Please enter manually.")
+      (geoError) => {
+        setIsLocating(false);
+        if (geoError.code === 1) {
+          setError("Location permission denied. Enable location access in browser site settings and try again.");
+          return;
+        }
+        if (geoError.code === 2) {
+          setError("Position unavailable. Move to an open area or check your device location services.");
+          return;
+        }
+        setError("Unable to fetch your location. Please enter coordinates manually.");
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 12000,
+        maximumAge: 0
+      }
     );
   };
 
@@ -54,13 +114,13 @@ function NewComplaintPage() {
       return;
     }
 
-    const [latText, lngText] = form.location.split(",").map((part) => part.trim());
-    const lat = Number(latText);
-    const lng = Number(lngText);
-    if (Number.isNaN(lat) || Number.isNaN(lng)) {
-      setError("Location must be in 'lat, lng' format.");
+    const parsedLocation = parseLocationInput(form.location);
+    if (!parsedLocation) {
+      setError(LOCATION_ERROR_TEXT);
       return;
     }
+
+    const { lat, lng } = parsedLocation;
 
     setIsSubmitting(true);
 
@@ -132,9 +192,9 @@ function NewComplaintPage() {
               {departments.map((dep) => <option key={dep}>{dep}</option>)}
             </select>
             <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-              <input type="text" placeholder="Location (lat, lng)" value={form.location} onChange={(event) => setField("location", event.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900" />
-              <button type="button" onClick={fetchLocation} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-300 px-4 py-3 font-semibold text-slate-700">
-                <LocateFixed size={16} /> Auto Locate
+              <input type="text" placeholder="Location (22.69050, 72.86175)" value={form.location} onChange={(event) => setField("location", event.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900" />
+              <button type="button" onClick={fetchLocation} disabled={isLocating} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-60">
+                <LocateFixed size={16} /> {isLocating ? "Locating..." : "Auto Locate"}
               </button>
             </div>
 

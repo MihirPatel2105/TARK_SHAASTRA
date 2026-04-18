@@ -1,12 +1,44 @@
-import { AlertTriangle, BarChart3, BadgeCheck, FileX, RotateCw } from "lucide-react";
-import { useContext, useMemo } from "react";
+import { AlertTriangle, BarChart3, BadgeCheck, FileX, RotateCw, Mic } from "lucide-react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppContext } from "../../App";
 import MetricCard from "../../components/MetricCard";
+import { fetchIvrComplaints } from "../../services/backendApi";
 
 function AdminDashboardPage() {
   const navigate = useNavigate();
   const { complaints } = useContext(AppContext);
+  const [ivrItems, setIvrItems] = useState([]);
+  const [ivrLoading, setIvrLoading] = useState(false);
+  const [ivrError, setIvrError] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadIvr = async () => {
+      setIvrLoading(true);
+      setIvrError("");
+      try {
+        const result = await fetchIvrComplaints({ limit: 6 });
+        if (isMounted) {
+          setIvrItems(result.complaints || []);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setIvrError(error.message || "Failed to load IVR transcripts");
+        }
+      } finally {
+        if (isMounted) {
+          setIvrLoading(false);
+        }
+      }
+    };
+
+    loadIvr();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const summary = useMemo(() => {
     const total = complaints.length;
@@ -87,6 +119,65 @@ function AdminDashboardPage() {
           </div>
         </article>
       </div>
+
+      <article className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-card">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-slate-900">
+            <Mic size={18} className="text-emerald-700" />
+            <h2 className="text-xl font-semibold">Recent IVR Transcripts</h2>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              setIvrLoading(true);
+              setIvrError("");
+              try {
+                const result = await fetchIvrComplaints({ limit: 6 });
+                setIvrItems(result.complaints || []);
+              } catch (error) {
+                setIvrError(error.message || "Failed to refresh transcripts");
+              } finally {
+                setIvrLoading(false);
+              }
+            }}
+            className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+          >
+            Refresh
+          </button>
+        </div>
+
+        {ivrError ? <p className="mt-4 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{ivrError}</p> : null}
+
+        <div className="mt-4 space-y-3">
+          {ivrLoading ? <p className="text-sm text-slate-500">Loading transcripts...</p> : null}
+
+          {!ivrLoading && !ivrItems.length ? (
+            <p className="text-sm text-slate-500">No IVR transcript records found yet.</p>
+          ) : null}
+
+          {ivrItems.map((item) => (
+            <div key={item.id} className="rounded-2xl border border-slate-200 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-slate-900">{item.phone || "Unknown caller"}</p>
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    item.transcriptStatus === "COMPLETED"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : item.transcriptStatus === "FAILED"
+                        ? "bg-rose-50 text-rose-700"
+                        : "bg-amber-50 text-amber-700"
+                  }`}
+                >
+                  {item.transcriptStatus}
+                </span>
+              </div>
+              <p className="mt-2 text-sm text-slate-600">
+                {item.transcript || item.transcriptError || "Transcript is pending..."}
+              </p>
+            </div>
+          ))}
+        </div>
+      </article>
     </section>
   );
 }

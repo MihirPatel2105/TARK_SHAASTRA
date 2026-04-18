@@ -46,6 +46,45 @@ npm run dev
 ### Health
 
 - `GET /health`
+- `GET /api/ivr/health`
+
+### IVR Complaint Recording (Twilio)
+
+- `POST /api/ivr/voice` (Twilio Voice webhook)
+- `POST /api/ivr/handle-key` (DTMF key handling)
+- `POST /api/ivr/save-recording` (recording callback)
+- `GET /api/ivr/complaints` (list IVR recordings + transcript state)
+- `POST /api/ivr/complaints/:id/retry-transcription` (queue failed/pending transcription again)
+
+Flow:
+
+- Caller hears Gujarati prompt and presses `1`.
+- System records voice (`maxLength: 60`).
+- Recording is fetched from Twilio, uploaded to Cloudinary, and saved in MongoDB collection `ivrcomplaints`.
+- After upload, background transcription is triggered with HuggingFace Whisper and transcript is stored in the same `ivrcomplaints` document.
+
+Required env vars:
+
+- `TWILIO_ACCOUNT_SID` (needed when Twilio recording URL requires auth)
+- `TWILIO_AUTH_TOKEN` (needed when Twilio recording URL requires auth)
+- `CLOUDINARY_CLOUD_NAME`
+- `CLOUDINARY_API_KEY`
+- `CLOUDINARY_API_SECRET`
+- `HF_API_KEY` (HuggingFace token for Whisper transcription)
+
+Optional STT env vars:
+
+- `HF_SPEECH_MODEL_URL` (default: `openai/whisper-large-v3` inference endpoint)
+- `HF_STT_RETRIES` (default: `3`)
+- `HF_STT_RETRY_DELAY_MS` (default: `5000`)
+- `IVR_MAX_TRANSCRIBE_SECONDS` (default: `60`)
+
+Transcription status values in `ivrcomplaints`:
+
+- `PENDING`
+- `PROCESSING`
+- `COMPLETED`
+- `FAILED`
 
 ### Auth
 

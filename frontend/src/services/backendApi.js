@@ -290,3 +290,44 @@ export async function verifyAdminComplaint(complaintId, verificationStatus) {
   const data = await parseResponse(response);
   return toUiComplaint(data.complaint);
 }
+
+function toUiIvrComplaint(complaint) {
+  const createdAt = complaint.created_at ? new Date(complaint.created_at).toISOString() : null;
+  const completedAt = complaint.transcription_completed_at ? new Date(complaint.transcription_completed_at).toISOString() : null;
+
+  return {
+    id: complaint._id,
+    phone: complaint.phone,
+    audioUrl: complaint.audio_url,
+    transcript: complaint.transcript || null,
+    transcriptStatus: complaint.transcript_status || 'PENDING',
+    transcriptError: complaint.transcript_error || null,
+    recordingDurationSec: complaint.recording_duration_sec ?? null,
+    createdAt,
+    completedAt
+  };
+}
+
+export async function fetchIvrComplaints({ status, page = 1, limit = 10 } = {}) {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit)
+  });
+
+  if (status) {
+    params.set('status', status);
+  }
+
+  const response = await apiFetch(`${API_BASE_URL}/ivr/complaints?${params.toString()}`, {
+    headers: buildAuthHeaders()
+  });
+
+  const data = await parseResponse(response);
+
+  return {
+    total: Number(data.total || 0),
+    page: Number(data.page || page),
+    limit: Number(data.limit || limit),
+    complaints: (data.complaints || []).map(toUiIvrComplaint)
+  };
+}
