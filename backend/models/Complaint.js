@@ -48,6 +48,12 @@ const ComplaintSchema = new Schema(
     image_public_id: {
       type: String
     },
+    resolved_image: {
+      type: String
+    },
+    resolved_image_public_id: {
+      type: String
+    },
     status: {
       type: String,
       enum: ['PENDING', 'IN_PROGRESS', 'RESOLVED', 'VERIFIED', 'FAILED', 'REOPENED'],
@@ -78,6 +84,10 @@ const ComplaintSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: 'User'
     },
+    assigned_to: {
+      type: Schema.Types.ObjectId,
+      ref: 'User'
+    },
     created_by: {
       type: Schema.Types.ObjectId,
       ref: 'User'
@@ -101,5 +111,6 @@ const ComplaintSchema = new Schema(
 ComplaintSchema.index({ location: '2dsphere' });
 ComplaintSchema.index({ location: '2dsphere', grievance_type: 1 });
 ComplaintSchema.index({ votes: -1, created_at: -1 });
+ComplaintSchema.index({ department: 1, status: 1, created_at: -1 });
 
 module.exports = mongoose.model('Complaint', ComplaintSchema);

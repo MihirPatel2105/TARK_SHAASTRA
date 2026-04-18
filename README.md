@@ -44,6 +44,8 @@ npm run dev
 
 - `POST /api/users`
 
+For officers, `department` is required (example: `Roads`, `Water`, `Electricity`, `Sanitation`).
+
 ### Complaints
 
 - `POST /api/complaints`
@@ -52,6 +54,24 @@ npm run dev
 - `POST /api/complaints/:id/vote`
 - `POST /api/complaints/:id/resolve`
 - `GET /api/complaints/analytics`
+
+### Officer Dashboard APIs
+
+Send officer user ID in header: `x-user-id: <OFFICER_ID>`
+
+- `GET /api/officer/complaints`
+- `GET /api/officer/complaints?status=PENDING`
+- `POST /api/officer/complaints/:id/start`
+- `POST /api/officer/complaints/:id/resolve`
+
+Officer resolve uses `multipart/form-data` with:
+
+- `image` (required proof image)
+- `officer_lat` (required)
+- `officer_lng` (required)
+
+The backend validates GPS using Haversine distance between officer location and complaint location.
+If distance is <= 100m then `gps_match_flag = 1`, else `gps_match_flag = 0`.
 
 ## Request examples
 
@@ -72,6 +92,13 @@ Fields:
 - `assign_officer_id` optional
 - `force_create` optional
 
+If `department` is not provided, backend auto-maps from `grievance_type` for:
+
+- `Pothole -> Roads`
+- `Leakage -> Water`
+- `Power Cut -> Electricity`
+- `Garbage -> Sanitation`
+
 ### Vote complaint
 
 ```json
@@ -91,6 +118,9 @@ Fields:
 - `gps_match_flag`
 - `photo_uploaded`
 - `image` optional
+
+This route is retained for existing system-level resolution flow.
+For officer dashboard flow, use `/api/officer/complaints/:id/resolve`.
 
 ### Duplicate detection
 

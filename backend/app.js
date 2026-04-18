@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const complaintRoutes = require('./routes/complaintRoutes');
 const userRoutes = require('./routes/userRoutes');
+const officerRoutes = require('./routes/officerRoutes');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
@@ -22,6 +23,7 @@ app.get('/health', (req, res) => {
 
 app.use('/api/complaints', complaintRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/officer', officerRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

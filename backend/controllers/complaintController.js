@@ -3,6 +3,16 @@ const Complaint = require('../models/Complaint');
 const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const { uploadBufferToCloudinary } = require('../services/cloudinaryService');
+const { haversineDistanceMeters } = require('../utils/geo');
+
+const GRIEVANCE_DEPARTMENT_MAP = {
+  pothole: 'Roads',
+  leakage: 'Water',
+  'power cut': 'Electricity',
+  garbage: 'Sanitation'
+};
+
+const OFFICER_TRACKED_STATUSES = ['PENDING', 'IN_PROGRESS', 'RESOLVED'];
 
 function parseNumber(value, fallback = null) {
   if (value === undefined || value === null || value === '') {
@@ -27,6 +37,28 @@ function buildPointFromBody(body) {
   };
 }
 
+function normalizeDepartment(department) {
+  if (!department || typeof department !== 'string') {
+    return null;
+  }
+
+  const normalized = department.trim();
+  return normalized.length ? normalized : null;
+}
+
+function inferDepartmentFromGrievanceType(grievanceType) {
+  if (!grievanceType || typeof grievanceType !== 'string') {
+    return null;
+  }
+
+  const mappedDepartment = GRIEVANCE_DEPARTMENT_MAP[grievanceType.trim().toLowerCase()];
+  return mappedDepartment || null;
+}
+
+function resolveDepartment(departmentInput, grievanceType) {
+  return normalizeDepartment(departmentInput) || inferDepartmentFromGrievanceType(grievanceType);
+}
+
 async function getNearbyComplaintsByLocation(point, radiusMeters, grievanceType) {
   const complaints = await Complaint.find({
     grievance_type: grievanceType,
@@ -43,9 +75,10 @@ async function getNearbyComplaintsByLocation(point, radiusMeters, grievanceType)
   return complaints;
 }
 
-async function findNearestOfficer(point) {
+async function findOfficerForDepartment(point, department) {
   return User.findOne({
     role: 'officer',
+    department,
     location: {
       $near: {
         $geometry: point,
@@ -63,12 +96,16 @@ function serializeComplaint(complaint) {
   };
 }
 
+function getComplaintAssignee(complaint) {
+  return complaint.assigned_to || complaint.assigned_officer;
+}
+
 const createComplaint = asyncHandler(async (req, res) => {
   const {
     grievance_id,
     title,
     description,
-    department,
+    department: departmentInput,
     grievance_type,
     lat,
     lng,
@@ -77,9 +114,15 @@ const createComplaint = asyncHandler(async (req, res) => {
     force_create
   } = req.body;
 
-  if (!grievance_id || !title || !description || !department || !grievance_type) {
+  if (!grievance_id || !title || !description || !grievance_type) {
     res.status(400);
-    throw new Error('grievance_id, title, description, department, and grievance_type are required');
+    throw new Error('grievance_id, title, description, and grievance_type are required');
+  }
+
+  const department = resolveDepartment(departmentInput, grievance_type);
+  if (!department) {
+    res.status(400);
+    throw new Error('department is required or grievance_type must be mappable to a department');
   }
 
   const location = buildPointFromBody(req.body);
@@ -114,6 +157,10 @@ const createComplaint = asyncHandler(async (req, res) => {
     imagePublicId = uploadResult.public_id;
   }
 
+  const fallbackOfficer = mongoose.Types.ObjectId.isValid(assign_officer_id)
+    ? null
+    : await findOfficerForDepartment(location, department);
+
   const complaint = await Complaint.create({
     grievance_id,
     title,
@@ -125,9 +172,12 @@ const createComplaint = asyncHandler(async (req, res) => {
     image_public_id: imagePublicId,
     status: 'PENDING',
     created_by: mongoose.Types.ObjectId.isValid(created_by) ? created_by : undefined,
+    assigned_to: mongoose.Types.ObjectId.isValid(assign_officer_id)
+      ? assign_officer_id
+      : fallbackOfficer?._id,
     assigned_officer: mongoose.Types.ObjectId.isValid(assign_officer_id)
       ? assign_officer_id
-      : (await findNearestOfficer(location))?._id,
+      : fallbackOfficer?._id,
     gps_match_flag: 1,
     photo_uploaded: req.file ? 1 : 0,
     ivr_response: 0
@@ -180,7 +230,10 @@ const getNearbyComplaints = asyncHandler(async (req, res) => {
 });
 
 const getComplaintById = asyncHandler(async (req, res) => {
-  const complaint = await Complaint.findById(req.params.id).populate('assigned_officer', 'name role').lean();
+  const complaint = await Complaint.findById(req.params.id)
+    .populate('assigned_officer', 'name role department')
+    .populate('assigned_to', 'name role department')
+    .lean();
 
   if (!complaint) {
     res.status(404);
@@ -260,6 +313,140 @@ const resolveComplaint = asyncHandler(async (req, res) => {
   });
 });
 
+const getOfficerComplaints = asyncHandler(async (req, res) => {
+  if (!req.user.department) {
+    res.status(400);
+    throw new Error('Officer department is required on user profile');
+  }
+
+  const query = {
+    department: req.user.department,
+    status: { $in: OFFICER_TRACKED_STATUSES }
+  };
+
+  if (req.query.status) {
+    query.status = req.query.status;
+  }
+
+  const complaints = await Complaint.find(query)
+    .sort({ created_at: -1 })
+    .lean();
+
+  res.json({
+    officer: {
+      id: req.user._id,
+      department: req.user.department,
+      role: req.user.role
+    },
+    count: complaints.length,
+    complaints: complaints.map(serializeComplaint)
+  });
+});
+
+const startComplaintWork = asyncHandler(async (req, res) => {
+  if (!req.user.department) {
+    res.status(400);
+    throw new Error('Officer department is required on user profile');
+  }
+
+  const complaint = await Complaint.findById(req.params.id);
+  if (!complaint) {
+    res.status(404);
+    throw new Error('Complaint not found');
+  }
+
+  if (complaint.department !== req.user.department) {
+    res.status(403);
+    throw new Error('You can only start complaints in your department');
+  }
+
+  if (complaint.status !== 'PENDING') {
+    res.status(400);
+    throw new Error('Only PENDING complaints can be started');
+  }
+
+  complaint.status = 'IN_PROGRESS';
+  complaint.assigned_to = req.user._id;
+  complaint.assigned_officer = req.user._id;
+  await complaint.save();
+
+  res.json({
+    message: 'Complaint moved to IN_PROGRESS',
+    complaint: serializeComplaint(complaint.toObject())
+  });
+});
+
+const resolveOfficerComplaint = asyncHandler(async (req, res) => {
+  if (!req.user.department) {
+    res.status(400);
+    throw new Error('Officer department is required on user profile');
+  }
+
+  const complaint = await Complaint.findById(req.params.id);
+  if (!complaint) {
+    res.status(404);
+    throw new Error('Complaint not found');
+  }
+
+  if (complaint.department !== req.user.department) {
+    res.status(403);
+    throw new Error('You can only resolve complaints in your department');
+  }
+
+  const assigneeId = getComplaintAssignee(complaint);
+  if (assigneeId && assigneeId.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+    res.status(403);
+    throw new Error('Complaint is assigned to another officer');
+  }
+
+  const officerLat = parseNumber(req.body.officer_lat ?? req.body.lat);
+  const officerLng = parseNumber(req.body.officer_lng ?? req.body.lng);
+
+  if (officerLat === null || officerLng === null) {
+    res.status(400);
+    throw new Error('officer_lat and officer_lng are required for GPS validation');
+  }
+
+  if (!req.file) {
+    res.status(400);
+    throw new Error('Resolution proof image is required');
+  }
+
+  const uploadResult = await uploadBufferToCloudinary(req.file.buffer, {
+    folder: 'complaints/resolutions'
+  });
+
+  const distanceMeters = haversineDistanceMeters(
+    [officerLng, officerLat],
+    complaint.location.coordinates
+  );
+  const gpsMatchFlag = distanceMeters <= 100 ? 1 : 0;
+
+  complaint.status = 'RESOLVED';
+  complaint.assigned_to = req.user._id;
+  complaint.assigned_officer = req.user._id;
+  complaint.resolved_image = uploadResult.secure_url;
+  complaint.resolved_image_public_id = uploadResult.public_id;
+  complaint.photo_uploaded = 1;
+  complaint.gps_match_flag = gpsMatchFlag;
+  complaint.resolved_at = new Date();
+  await complaint.save();
+
+  await User.findByIdAndUpdate(req.user._id, {
+    location: {
+      type: 'Point',
+      coordinates: [officerLng, officerLat]
+    }
+  });
+
+  res.json({
+    message: 'Complaint resolved by officer',
+    gps_match_flag: gpsMatchFlag,
+    distance_meters: Math.round(distanceMeters),
+    complaint: serializeComplaint(complaint.toObject())
+  });
+});
+
 const analytics = asyncHandler(async (req, res) => {
   const [totals, byStatus, topVoted] = await Promise.all([
     Complaint.aggregate([
@@ -305,7 +492,7 @@ const analytics = asyncHandler(async (req, res) => {
 });
 
 const registerUser = asyncHandler(async (req, res) => {
-  const { name, role, lat, lng, points } = req.body;
+  const { name, role, department, lat, lng, points } = req.body;
 
   if (!name) {
     res.status(400);
@@ -315,6 +502,7 @@ const registerUser = asyncHandler(async (req, res) => {
   const user = await User.create({
     name,
     role,
+    department: normalizeDepartment(department),
     location: {
       type: 'Point',
       coordinates: [parseNumber(lng, 0), parseNumber(lat, 0)]
@@ -331,6 +519,9 @@ module.exports = {
   getComplaintById,
   voteOnComplaint,
   resolveComplaint,
+  getOfficerComplaints,
+  startComplaintWork,
+  resolveOfficerComplaint,
   analytics,
   registerUser
 };

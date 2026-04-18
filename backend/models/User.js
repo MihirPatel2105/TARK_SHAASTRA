@@ -15,6 +15,14 @@ const UserSchema = new Schema(
       default: 'citizen',
       index: true
     },
+    department: {
+      type: String,
+      trim: true,
+      default: null,
+      required: function requiredDepartmentForOfficer() {
+        return this.role === 'officer';
+      }
+    },
     location: {
       type: {
         type: String,
@@ -37,5 +45,6 @@ const UserSchema = new Schema(
 );
 
 UserSchema.index({ location: '2dsphere' });
+UserSchema.index({ role: 1, department: 1 });
 
 module.exports = mongoose.model('User', UserSchema);
