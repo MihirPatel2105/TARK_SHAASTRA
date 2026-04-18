@@ -98,6 +98,36 @@ const ComplaintSchema = new Schema(
     image_public_id: {
       type: String
     },
+    ai_classification: {
+      detected_class: {
+        type: String,
+        default: null
+      },
+      confidence: {
+        type: Number,
+        default: 0
+      },
+      selected_model: {
+        type: String,
+        default: null
+      },
+      department_from_ai: {
+        type: String,
+        default: null
+      },
+      decision: {
+        type: String,
+        default: null
+      },
+      min_confidence_threshold: {
+        type: Number,
+        default: null
+      },
+      model_results: {
+        type: [Schema.Types.Mixed],
+        default: []
+      }
+    },
     resolved_image: {
       type: String
     },

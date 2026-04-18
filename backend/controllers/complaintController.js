@@ -3,6 +3,7 @@ const Complaint = require('../models/Complaint');
 const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const { uploadBufferToCloudinary } = require('../services/cloudinaryService');
+const { classifyImageByAllModels } = require('../services/roboflowService');
 const { haversineDistanceMeters } = require('../utils/geo');
 const { extractImageGps } = require('../utils/imageGps');
 
@@ -137,11 +138,7 @@ const createComplaint = asyncHandler(async (req, res) => {
     throw new Error('grievance_id, title, description, and grievance_type are required');
   }
 
-  const department = resolveDepartment(departmentInput, grievance_type);
-  if (!department) {
-    res.status(400);
-    throw new Error('department is required or grievance_type must be mappable to a department');
-  }
+  const fallbackDepartment = resolveDepartment(departmentInput, grievance_type);
 
   const location = buildPointFromBody(req.body);
   if (!location) {
@@ -189,6 +186,18 @@ const createComplaint = asyncHandler(async (req, res) => {
   imageUrl = uploadResult.secure_url;
   imagePublicId = uploadResult.public_id;
 
+  const classification = await classifyImageByAllModels(imageUrl);
+  const aiDepartment = classification?.best?.decision === 'AUTO_ASSIGNED'
+    ? classification.best.department
+    : null;
+
+  const department = aiDepartment || fallbackDepartment || classification?.best?.department || 'General';
+
+  if (!department) {
+    res.status(400);
+    throw new Error('department could not be resolved from AI classification or grievance mapping');
+  }
+
   const fallbackOfficer = mongoose.Types.ObjectId.isValid(assign_officer_id)
     ? null
     : await findOfficerForDepartment(location, department);
@@ -205,6 +214,15 @@ const createComplaint = asyncHandler(async (req, res) => {
     image_location: imageLocation,
     image_url: imageUrl,
     image_public_id: imagePublicId,
+    ai_classification: {
+      detected_class: classification?.best?.label || null,
+      confidence: classification?.best?.confidence || 0,
+      selected_model: classification?.best?.model || null,
+      department_from_ai: classification?.best?.department || null,
+      decision: classification?.best?.decision || 'FAILED',
+      min_confidence_threshold: classification?.threshold ?? null,
+      model_results: classification?.models || []
+    },
     status: 'PENDING',
     created_by: mongoose.Types.ObjectId.isValid(created_by) ? created_by : undefined,
     assigned_to: mongoose.Types.ObjectId.isValid(assign_officer_id)
@@ -222,6 +240,11 @@ const createComplaint = asyncHandler(async (req, res) => {
 
   res.status(201).json({
     message: 'Complaint created successfully',
+    department_assignment: {
+      final_department: department,
+      source: aiDepartment ? 'AI' : (fallbackDepartment ? 'FALLBACK' : 'DEFAULT'),
+      ai: classification
+    },
     gps_validation: {
       user_image_distance_meters: Math.round(userImageDistanceMeters),
       gps_match_flag: gpsMatchFlag
