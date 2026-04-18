@@ -7,9 +7,9 @@ function MetricCard({ label, value, helper, accent = "blue" }) {
   };
 
   return (
-    <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-card">
+    <article className="rounded-3xl border border-blue-200 bg-white p-5 shadow-sm">
       <div className={`mb-4 h-1.5 w-16 rounded-full bg-gradient-to-r ${accentMap[accent] || accentMap.blue}`} />
-      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
+      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-700">{label}</p>
       <p className="mt-3 text-4xl font-bold text-slate-900">{value}</p>
       {helper ? <p className="mt-2 text-sm text-slate-500">{helper}</p> : null}
     </article>

@@ -33,10 +33,10 @@ function ProfilePage() {
 
   return (
     <section className="space-y-8">
-      <div className="rounded-[2rem] bg-gradient-to-br from-blue-700 via-slate-900 to-cyan-700 p-8 text-white shadow-[0_20px_60px_rgba(15,23,42,0.12)]">
-        <p className="inline-flex rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold">Citizen Profile</p>
-        <h2 className="mt-6 text-4xl font-bold leading-tight">{user?.name || "Citizen User"}</h2>
-        <p className="mt-3 text-sky-100">Manage your account overview and track your grievance activity at a glance.</p>
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Citizen Profile</p>
+        <h2 className="mt-2 text-3xl font-semibold text-slate-900">{user?.name || "Citizen User"}</h2>
+        <p className="mt-2 text-sm leading-7 text-slate-600">Manage your account overview and track your grievance activity at a glance.</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -56,7 +56,7 @@ function ProfilePage() {
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Needs Attention</p>
           <p className="mt-2 text-3xl font-bold text-rose-700">{stats.reopened}</p>
         </article>
-        <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-card md:col-span-2 xl:col-span-4">
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:col-span-2 xl:col-span-4">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Points Summary</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">{Number(user?.points || 0) + stats.earnedPoints}</p>
           <p className="mt-1 text-sm text-slate-600">Base profile points: {Number(user?.points || 0)} | Workflow score delta: {stats.earnedPoints}</p>
@@ -64,7 +64,7 @@ function ProfilePage() {
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
-        <article className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-card">
+        <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center gap-2 text-slate-900">
             <UserCircle2 size={20} className="text-blue-700" />
             <h3 className="text-xl font-semibold">Account Details</h3>
@@ -78,7 +78,7 @@ function ProfilePage() {
           </div>
         </article>
 
-        <article className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-card">
+        <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="text-xl font-semibold text-slate-900">Recent Complaint Activity</h3>
           {latest.length ? (
             <div className="mt-4 divide-y divide-slate-200">

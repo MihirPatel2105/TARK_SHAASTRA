@@ -1,4 +1,4 @@
-import { LogOut, UserCircle2 } from "lucide-react";
+import { LogOut, ShieldCheck, UserCircle2 } from "lucide-react";
 import { useContext } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AppContext } from "../App";
@@ -19,11 +19,15 @@ function Navbar() {
   const profilePath = profileRoutes[user?.role] || "/login";
 
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
-        <button type="button" onClick={() => navigate(homePath)} className="text-left">
-          <span className="block text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Verified Grievance System</span>
-          <span className="block text-xl font-bold leading-tight text-slate-900 sm:text-2xl">Dashboard</span>
+    <header className="sticky top-0 z-30 border-b border-slate-300 bg-white shadow-sm">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
+        <button type="button" onClick={() => navigate(homePath)} className="flex items-center gap-4 text-left">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-blue-900 bg-gradient-to-br from-orange-400 to-green-600 text-white">
+            <ShieldCheck size={28} />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-slate-900">Verified Grievance System</h1>
+          </div>
         </button>
 
         <div className="flex items-center gap-3">
@@ -32,7 +36,7 @@ function Navbar() {
             className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             title="Open profile"
           >
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700">
               <UserCircle2 size={16} />
             </span>
             {user?.role || "Citizen"}

@@ -17,14 +17,14 @@ function AdminProfilePage() {
 
   return (
     <section className="space-y-8">
-      <div className="rounded-[2rem] bg-gradient-to-br from-indigo-700 via-slate-900 to-blue-700 p-8 text-white shadow-[0_20px_60px_rgba(15,23,42,0.12)]">
-        <p className="inline-flex rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold">Admin Profile</p>
-        <h2 className="mt-6 text-4xl font-bold leading-tight">{user?.name || "System Admin"}</h2>
-        <p className="mt-3 text-indigo-100">Governance summary for complaint lifecycle, verification quality, and operational load.</p>
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Admin Profile</p>
+        <h2 className="mt-2 text-3xl font-semibold text-slate-900">{user?.name || "System Admin"}</h2>
+        <p className="mt-2 text-sm leading-7 text-slate-600">Governance summary for complaint lifecycle, verification quality, and operational load.</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-card">
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Total Complaints</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">{stats.total}</p>
         </article>
@@ -43,7 +43,7 @@ function AdminProfilePage() {
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
-        <article className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-card">
+        <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center gap-2 text-slate-900">
             <UserCircle2 size={20} className="text-indigo-700" />
             <h3 className="text-xl font-semibold">Administrator Details</h3>
@@ -56,7 +56,7 @@ function AdminProfilePage() {
           </div>
         </article>
 
-        <article className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-card">
+        <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="text-xl font-semibold text-slate-900">Governance Snapshot</h3>
           <div className="mt-4 space-y-4 text-sm text-slate-700">
             <div className="rounded-2xl bg-slate-50 p-4">

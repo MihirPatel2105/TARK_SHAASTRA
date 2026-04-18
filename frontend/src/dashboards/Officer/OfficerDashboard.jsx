@@ -62,28 +62,10 @@ function OfficerDashboardPage() {
 
   return (
     <section className="space-y-8">
-      <div className="rounded-[2rem] bg-gradient-to-br from-slate-900 via-blue-800 to-cyan-700 p-8 text-white shadow-[0_20px_60px_rgba(15,23,42,0.12)]">
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="inline-flex rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold">Officer Workspace</p>
-          <p className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-sky-100">
-            <RefreshCcw size={12} className={isRefreshing ? "animate-spin" : ""} />
-            Live refresh every 15s
-          </p>
-        </div>
-        <h1 className="mt-6 text-5xl font-bold leading-tight">Officer Dashboard</h1>
-        <p className="mt-4 max-w-3xl text-lg leading-8 text-sky-100">Resolve assigned complaints, upload proof, and keep the verification queue moving without hiding the final accountability step.</p>
-      </div>
-
       <div className="grid gap-4 md:grid-cols-3">
         <MetricCard label="Assigned" value={assigned.length} helper="Open cases in your queue" accent="blue" />
         <MetricCard label="Resolved" value={resolved.length} helper="Resolved or verified items" accent="green" />
         <MetricCard label="Awaiting Verification" value={awaiting.length} helper="Still waiting for confirmation" accent="yellow" />
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-4">
-        {cards.map((card) => (
-          <DashboardCard key={card.title} {...card} onClick={() => navigate(card.path)} />
-        ))}
       </div>
 
       <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-card">

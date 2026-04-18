@@ -17,14 +17,14 @@ function OfficerProfilePage() {
 
   return (
     <section className="space-y-8">
-      <div className="rounded-[2rem] bg-gradient-to-br from-emerald-700 via-slate-900 to-cyan-700 p-8 text-white shadow-[0_20px_60px_rgba(15,23,42,0.12)]">
-        <p className="inline-flex rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold">Officer Profile</p>
-        <h2 className="mt-6 text-4xl font-bold leading-tight">{user?.name || "Field Officer"}</h2>
-        <p className="mt-3 text-emerald-100">Operational overview for assigned work, verification outcomes, and resolution performance.</p>
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Officer Profile</p>
+        <h2 className="mt-2 text-3xl font-semibold text-slate-900">{user?.name || "Field Officer"}</h2>
+        <p className="mt-2 text-sm leading-7 text-slate-600">Operational overview for assigned work, verification outcomes, and resolution performance.</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-card">
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Assigned</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">{stats.assigned}</p>
         </article>
@@ -43,7 +43,7 @@ function OfficerProfilePage() {
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
-        <article className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-card">
+        <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center gap-2 text-slate-900">
             <UserCircle2 size={20} className="text-emerald-700" />
             <h3 className="text-xl font-semibold">Officer Details</h3>
@@ -56,7 +56,7 @@ function OfficerProfilePage() {
           </div>
         </article>
 
-        <article className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-card">
+        <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="text-xl font-semibold text-slate-900">Recent Assigned Activity</h3>
           {latest.length ? (
             <div className="mt-4 divide-y divide-slate-200">

@@ -5,13 +5,13 @@ function DashboardCard({ title, description, icon: Icon, colorClass, onClick }) 
     <button
       type="button"
       onClick={onClick}
-      className="group w-full rounded-3xl border border-slate-200 bg-white p-6 text-left shadow-card transition hover:-translate-y-0.5 hover:shadow-xl"
+      className="group w-full rounded-3xl border border-blue-200 bg-white p-6 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40"
     >
       <div className="flex items-center justify-between">
-        <div className={`rounded-2xl p-3.5 ${colorClass}`}>
+        <div className={`rounded-2xl border border-blue-200 p-3.5 ${colorClass}`}>
           <Icon size={22} className="text-white" />
         </div>
-        <ArrowRight className="text-slate-400 transition group-hover:translate-x-1" />
+        <ArrowRight className="text-blue-400 transition group-hover:translate-x-1" />
       </div>
 
       <h3 className="mt-5 text-lg font-semibold text-slate-900">{title}</h3>

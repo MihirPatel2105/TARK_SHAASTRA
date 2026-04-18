@@ -37,15 +37,7 @@ function AdminDashboardPage() {
 
   return (
     <section className="space-y-8">
-      <div className="rounded-[2rem] bg-gradient-to-br from-slate-900 via-blue-800 to-cyan-700 p-8 text-white shadow-[0_20px_60px_rgba(15,23,42,0.12)]">
-        <p className="inline-flex rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold">Admin Workspace</p>
-        <h1 className="mt-6 text-5xl font-bold leading-tight">Verified Grievance Analytics</h1>
-        <p className="mt-4 max-w-3xl text-lg leading-8 text-sky-100">Monitor verification outcomes, department performance, and complaint status integrity from one controlled dashboard.</p>
-        <div className="mt-8 grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          <button type="button" onClick={() => navigate("/admin/analytics")} className="rounded-2xl bg-white px-4 py-3 font-semibold text-slate-900">Open Analytics</button>
-          <button type="button" onClick={() => navigate("/admin/complaints")} className="rounded-2xl border border-white/50 px-4 py-3 font-semibold text-white">Complaint Table</button>
-        </div>
-      </div>
+      
 
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard label="Total Complaints" value={summary.total} helper="All complaints in the system" accent="blue" />
