@@ -2,8 +2,8 @@ import { Lock, ShieldCheck, Sparkles, UserRound } from "lucide-react";
 import { useContext, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AppContext } from "../App";
-import { authenticateUser, getHomePath } from "../services/authStore";
-import { demoCredentials } from "../services/demoCredentials";
+import { authenticateDemoUser, getHomePath } from "../services/authStore";
+import { loginUser } from "../services/backendApi";
 
 const initialForm = { email: "", password: "" };
 
@@ -12,32 +12,48 @@ function LoginPage() {
   const { login } = useContext(AppContext);
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const onChange = (event) => {
     setForm((prev) => ({ ...prev, [event.target.name]: event.target.value }));
     setError("");
   };
 
-  const fillDemo = (account) => {
-    setForm({ email: account.email, password: account.password });
-    setError("");
-  };
-
-  const onSubmit = (event) => {
+  const onSubmit = async (event) => {
     event.preventDefault();
     if (!form.email || !form.password) {
       setError("Enter your email and password.");
       return;
     }
 
-    const user = authenticateUser(form.email, form.password);
-    if (!user) {
-      setError("Invalid credentials. Use the demo credentials shown on this page or sign up first.");
-      return;
-    }
+    setIsSubmitting(true);
 
-    login(user);
-    navigate(getHomePath(user.role));
+    try {
+      const session = await loginUser({
+        email: form.email.trim().toLowerCase(),
+        password: form.password
+      });
+
+      login(session.user, session.token);
+      navigate(getHomePath(session.user?.role));
+    } catch (submitError) {
+      const demoUser = authenticateDemoUser(form.email, form.password);
+      if (demoUser) {
+        login(demoUser, "demo-token");
+        navigate(getHomePath(demoUser.role));
+        return;
+      }
+
+      const isBackendUnavailable = String(submitError?.message || "").includes("Unable to reach backend");
+
+      if (isBackendUnavailable) {
+        setError("Backend is offline. Start backend and MongoDB, or use valid demo credentials.");
+      } else {
+        setError(submitError.message || "Unable to log in. Please verify your credentials.");
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -77,20 +93,6 @@ function LoginPage() {
             </div>
           </div>
 
-          <div className="mt-6 grid gap-3 sm:grid-cols-3">
-            {Object.values(demoCredentials).map((account) => (
-              <button
-                key={account.role}
-                type="button"
-                onClick={() => fillDemo(account)}
-                className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:border-blue-200 hover:bg-blue-50"
-              >
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{account.role}</p>
-                <p className="mt-2 text-sm font-semibold text-slate-900">{account.email}</p>
-              </button>
-            ))}
-          </div>
-
           <form onSubmit={onSubmit} className="mt-6 space-y-4">
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-700">Email</span>
@@ -126,9 +128,10 @@ function LoginPage() {
 
             <button
               type="submit"
+              disabled={isSubmitting}
               className="w-full rounded-2xl bg-blue-700 px-4 py-3.5 text-base font-semibold text-white shadow-lg shadow-blue-700/20 transition hover:bg-blue-800"
             >
-              Sign In
+              {isSubmitting ? "Signing In..." : "Sign In"}
             </button>
           </form>
 

@@ -63,21 +63,6 @@ function NewComplaintPage() {
     }
 
     setIsSubmitting(true);
-    const date = new Date().toISOString().slice(0, 10);
-    const fallbackComplaint = {
-      id: `VGS-${Date.now()}`,
-      title: form.title,
-      description: form.description,
-      department: form.department,
-      status: "Pending",
-      createdAt: date,
-      resolvedAt: null,
-      citizenEmail: user?.email,
-      assignedOfficerEmail: "officer.demo@vgs.gov.in",
-      location: { lat, lng, area: form.location },
-      verification: { ivrResponse: "No", gpsMatch: false, photoUploaded: true },
-      timeline: [{ label: "Complaint Submitted", date }]
-    };
 
     try {
       const apiComplaint = await createComplaint({
@@ -89,19 +74,25 @@ function NewComplaintPage() {
         lat,
         lng,
         image: form.image,
-        citizen_email: user?.email
+        created_by: user?.id
       });
 
       addComplaint(apiComplaint);
       setSuccess("Complaint submitted to backend successfully.");
-    } catch {
-      addComplaint(fallbackComplaint);
-      setSuccess("Backend unavailable. Complaint saved locally in demo mode.");
+    } catch (submitError) {
+      const suggestions = submitError?.payload?.duplicate_suggestions;
+      if (Array.isArray(suggestions) && suggestions.length > 0) {
+        setError(`${submitError.message} (${suggestions.length} nearby suggestion(s) found)`);
+      } else {
+        setError(submitError.message || "Unable to submit complaint.");
+      }
+      return;
     } finally {
-      setForm(initialForm);
-      setStep(1);
       setIsSubmitting(false);
     }
+
+    setForm(initialForm);
+    setStep(1);
   };
 
   return (

@@ -1,4 +1,27 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "");
+import { loadAuthToken, loadStoredUser, normalizeRole } from "./authStore";
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "");
+
+function withNetworkMessage(error) {
+  // Browser fetch throws TypeError for DNS/CORS/offline/server-down cases.
+  if (error instanceof TypeError) {
+    const friendly = new Error(
+      `Unable to reach backend at ${API_BASE_URL}. Start backend server and try again.`
+    );
+    friendly.cause = error;
+    throw friendly;
+  }
+
+  throw error;
+}
+
+async function apiFetch(url, options) {
+  try {
+    return await fetch(url, options);
+  } catch (error) {
+    withNetworkMessage(error);
+  }
+}
 
 function titleCaseStatus(status) {
   const raw = String(status || "").toUpperCase();
@@ -59,7 +82,15 @@ export function toUiComplaint(complaint) {
 
 async function parseResponse(response) {
   const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
+  let data = null;
+
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text };
+    }
+  }
 
   if (!response.ok) {
     const message = data?.message || `Request failed with status ${response.status}`;
@@ -72,8 +103,40 @@ async function parseResponse(response) {
   return data;
 }
 
-export async function createUser(payload) {
-  const response = await fetch(`${API_BASE_URL}/users`, {
+function buildAuthHeaders(baseHeaders = {}) {
+  const token = loadAuthToken();
+  const user = loadStoredUser();
+  const headers = { ...baseHeaders };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  if (user?.id) {
+    headers["x-user-id"] = user.id;
+  }
+
+  return headers;
+}
+
+function toUiUser(user) {
+  if (!user) {
+    return null;
+  }
+
+  return {
+    id: user.id || user._id,
+    name: user.name,
+    email: user.email,
+    role: normalizeRole(user.role),
+    department: user.department || null,
+    location: user.location,
+    points: user.points
+  };
+}
+
+export async function loginUser(payload) {
+  const response = await apiFetch(`${API_BASE_URL}/auth/login`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -81,7 +144,31 @@ export async function createUser(payload) {
     body: JSON.stringify(payload)
   });
 
-  return parseResponse(response);
+  const data = await parseResponse(response);
+
+  return {
+    message: data?.message,
+    token: data?.token,
+    user: toUiUser(data?.user)
+  };
+}
+
+export async function signupCitizen(payload) {
+  const response = await apiFetch(`${API_BASE_URL}/auth/signup`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await parseResponse(response);
+
+  return {
+    message: data?.message,
+    token: data?.token,
+    user: toUiUser(data?.user)
+  };
 }
 
 export async function createComplaint(payload) {
@@ -92,8 +179,9 @@ export async function createComplaint(payload) {
     }
   });
 
-  const response = await fetch(`${API_BASE_URL}/complaints`, {
+  const response = await apiFetch(`${API_BASE_URL}/complaints`, {
     method: "POST",
+    headers: buildAuthHeaders(),
     body: formData
   });
 
@@ -112,7 +200,93 @@ export async function fetchNearbyComplaints({ lat, lng, radius = 2000, grievance
     params.set("grievance_type", grievanceType);
   }
 
-  const response = await fetch(`${API_BASE_URL}/complaints/nearby?${params.toString()}`);
+  const response = await apiFetch(`${API_BASE_URL}/complaints/nearby?${params.toString()}`);
   const data = await parseResponse(response);
   return (data.complaints || []).map(toUiComplaint);
+}
+
+export async function fetchOfficerComplaints(status) {
+  const params = new URLSearchParams();
+  if (status) {
+    params.set("status", status);
+  }
+
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const response = await apiFetch(`${API_BASE_URL}/officer/complaints${query}`, {
+    headers: buildAuthHeaders()
+  });
+  const data = await parseResponse(response);
+  return (data.complaints || []).map(toUiComplaint);
+}
+
+export async function startOfficerComplaint(complaintId) {
+  const response = await apiFetch(`${API_BASE_URL}/officer/complaints/${complaintId}/start`, {
+    method: "POST",
+    headers: buildAuthHeaders()
+  });
+  const data = await parseResponse(response);
+  return toUiComplaint(data.complaint);
+}
+
+export async function resolveOfficerComplaint(complaintId, payload) {
+  const formData = new FormData();
+  Object.entries(payload).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      formData.append(key, value);
+    }
+  });
+
+  const response = await apiFetch(`${API_BASE_URL}/officer/complaints/${complaintId}/resolve`, {
+    method: "POST",
+    headers: buildAuthHeaders(),
+    body: formData
+  });
+
+  const data = await parseResponse(response);
+  return toUiComplaint(data.complaint);
+}
+
+export async function fetchAdminComplaints(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      params.set(key, String(value));
+    }
+  });
+
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const response = await apiFetch(`${API_BASE_URL}/admin/complaints${query}`, {
+    headers: buildAuthHeaders()
+  });
+  const data = await parseResponse(response);
+  return (data.complaints || []).map(toUiComplaint);
+}
+
+export async function fetchAdminDashboard(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      params.set(key, String(value));
+    }
+  });
+
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const response = await apiFetch(`${API_BASE_URL}/admin/dashboard${query}`, {
+    headers: buildAuthHeaders()
+  });
+  return parseResponse(response);
+}
+
+export async function verifyAdminComplaint(complaintId, verificationStatus) {
+  const body = verificationStatus ? { verification_status: verificationStatus } : {};
+  const response = await apiFetch(`${API_BASE_URL}/admin/complaints/${complaintId}/verify`, {
+    method: "POST",
+    headers: buildAuthHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify(body)
+  });
+
+  const data = await parseResponse(response);
+  return toUiComplaint(data.complaint);
 }

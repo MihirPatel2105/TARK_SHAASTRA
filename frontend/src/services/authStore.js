@@ -1,7 +1,29 @@
-import { demoCredentials } from "./demoCredentials";
-
 const USER_KEY = "vgs_user";
-const REGISTERED_USERS_KEY = "vgs_registered_users";
+const TOKEN_KEY = "vgs_token";
+
+const demoUsers = [
+  {
+    role: "Citizen",
+    name: "Citizen Demo Account",
+    email: "citizen.demo@vgs.gov.in",
+    phone: "9876543210",
+    password: "Citizen@123"
+  },
+  {
+    role: "Officer",
+    name: "Officer Demo Account",
+    email: "officer.demo@vgs.gov.in",
+    phone: "9988776655",
+    password: "Officer@123"
+  },
+  {
+    role: "Admin",
+    name: "Admin Demo Account",
+    email: "admin.demo@vgs.gov.in",
+    phone: "9123456780",
+    password: "Admin@123"
+  }
+];
 
 const roleRoutes = {
   Citizen: "/citizen/dashboard",
@@ -40,54 +62,52 @@ export function clearStoredUser() {
   localStorage.removeItem(USER_KEY);
 }
 
-export function loadRegisteredUsers() {
-  return safeParse(localStorage.getItem(REGISTERED_USERS_KEY), []);
+export function loadAuthToken() {
+  return localStorage.getItem(TOKEN_KEY);
 }
 
-export function saveRegisteredUsers(users) {
-  localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify(users));
-}
-
-export function registerUser(user) {
-  const nextUser = {
-    name: user.name.trim(),
-    email: user.email.trim().toLowerCase(),
-    phone: user.phone.trim(),
-    password: user.password,
-    role: normalizeRole(user.role)
-  };
-
-  const users = loadRegisteredUsers().filter((item) => item.email !== nextUser.email);
-  users.push(nextUser);
-  saveRegisteredUsers(users);
-  return nextUser;
-}
-
-export function authenticateUser(email, password) {
-  const normalizedEmail = String(email || "").trim().toLowerCase();
-  const localUser = loadRegisteredUsers().find(
-    (item) => item.email === normalizedEmail && item.password === password
-  );
-  if (localUser) {
-    return {
-      name: localUser.name,
-      email: localUser.email,
-      phone: localUser.phone,
-      role: localUser.role
-    };
+export function saveAuthToken(token) {
+  if (!token) {
+    return;
   }
 
-  const matchedDemo = Object.values(demoCredentials).find(
+  localStorage.setItem(TOKEN_KEY, String(token));
+}
+
+export function clearAuthToken() {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+export function saveSession({ user, token }) {
+  if (user) {
+    saveStoredUser({ ...user, role: normalizeRole(user.role) });
+  }
+
+  if (token) {
+    saveAuthToken(token);
+  }
+}
+
+export function clearSession() {
+  clearStoredUser();
+  clearAuthToken();
+}
+
+export function authenticateDemoUser(email, password) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const matched = demoUsers.find(
     (item) => item.email.toLowerCase() === normalizedEmail && item.password === password
   );
-  if (!matchedDemo) {
+
+  if (!matched) {
     return null;
   }
 
   return {
-    name: matchedDemo.name,
-    email: matchedDemo.email,
-    phone: matchedDemo.phone,
-    role: matchedDemo.role
+    id: `demo-${normalizeRole(matched.role).toLowerCase()}`,
+    name: matched.name,
+    email: matched.email,
+    role: matched.role,
+    phone: matched.phone
   };
 }

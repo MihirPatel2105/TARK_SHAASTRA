@@ -1,9 +1,8 @@
 import { createContext, useCallback, useMemo, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import RoleLayout from "./components/layout/RoleLayout";
-import { clearStoredUser, getHomePath, loadStoredUser, normalizeRole, saveStoredUser } from "./services/authStore";
+import { clearSession, getHomePath, loadStoredUser, normalizeRole, saveSession } from "./services/authStore";
 import { fetchNearbyComplaints } from "./services/backendApi";
-import { mockComplaints } from "./services/mockData";
 import LoginPage from "./pages/auth/LoginPage";
 import SignupPage from "./pages/auth/SignupPage";
 import CitizenDashboardPage from "./dashboards/Citizen/CitizenDashboard";
@@ -47,7 +46,7 @@ const ProtectedRoute = ({ user, allowedRoles, children }) => {
 
 function App() {
   const [user, setUser] = useState(() => loadStoredUser());
-  const [complaints, setComplaints] = useState(() => loadLocal(COMPLAINTS_KEY, mockComplaints));
+  const [complaints, setComplaints] = useState(() => loadLocal(COMPLAINTS_KEY, []));
 
   const persistComplaints = useCallback((nextComplaintsOrUpdater) => {
     setComplaints((previous) => {
@@ -58,14 +57,14 @@ function App() {
     });
   }, []);
 
-  const login = (nextUser) => {
+  const login = (nextUser, token) => {
     const userRecord = { ...nextUser, role: normalizeRole(nextUser.role) };
-    saveStoredUser(userRecord);
+    saveSession({ user: userRecord, token });
     setUser(userRecord);
   };
 
   const logout = () => {
-    clearStoredUser();
+    clearSession();
     setUser(null);
   };
 
