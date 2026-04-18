@@ -649,7 +649,12 @@ const ingestIvrVerificationResponse = asyncHandler(async (req, res) => {
     transcript_text: req.body.transcript_text || complaint.ivr_metadata?.transcript_text || null
   };
 
-  if (responseValue === 2) {
+  if (responseValue === 1) {
+    complaint.status = 'VERIFIED';
+    complaint.verification_status = 'VERIFIED';
+    complaint.reopen_flag = 0;
+    complaint.verified_at = new Date();
+  } else if (responseValue === 2) {
     complaint.status = 'REOPENED';
     complaint.verification_status = 'REOPENED';
     complaint.reopen_flag = 1;

@@ -1,8 +1,8 @@
 const express = require("express");
 const twilio = require("twilio");
+const Complaint = require("../models/Complaint");
 
 const router = express.Router();
-const responses = [];
 const sseClients = [];
 const BASE_URL = (process.env.NGROK_URL || "").replace(/\/$/, "");
 
@@ -11,12 +11,35 @@ const AUDIO_2_URL = process.env.AUDIO_2_URL || "https://res.cloudinary.com/dje2k
 const AUDIO_3_URL = process.env.AUDIO_3_URL || "https://res.cloudinary.com/dje2kddqv/video/upload/v1776520247/_%E0%AA%A4%E0%AA%AE%E0%AA%BE%E0%AA%B0%E0%AB%80_%E0%AA%AB%E0%AA%B0%E0%AA%BF%E0%AA%AF%E0%AA%BE%E0%AA%A6_%E0%AA%AB%E0%AA%B0%E0%AB%80%E0%AA%A5%E0%AB%80.mp3_xzte1d.mp3";
 
 function addResponseLog(entry) {
-  const item = { timestamp: Date.now(), ...entry };
-  responses.unshift(item);
-  if (responses.length > 100) responses.pop();
-
-  const payload = `data: ${JSON.stringify(item)}\n\n`;
+  const payload = `data: ${JSON.stringify({ timestamp: Date.now(), ...entry })}\n\n`;
   sseClients.forEach((clientRes) => clientRes.write(payload));
+}
+
+function toStatusFromDigit(digit) {
+  if (digit === "1") {
+    return "RESOLVED ✅";
+  }
+  if (digit === "2") {
+    return "REOPEN ❌";
+  }
+  return "NO RESPONSE ⚠️";
+}
+
+async function getRecentResponses() {
+  const complaints = await Complaint.find({ ivr_response: { $in: [1, 2] } })
+    .sort({ created_at: -1 })
+    .limit(100)
+    .lean();
+
+  return complaints.map((item) => {
+    const digit = item.ivr_response === 1 ? "1" : item.ivr_response === 2 ? "2" : "";
+    return {
+      timestamp: item.verified_at || item.resolved_at || item.created_at || Date.now(),
+      from: item.citizen_phone || "-",
+      digit,
+      status: toStatusFromDigit(digit)
+    };
+  });
 }
 
 const hasTwilioCredentials = Boolean(
@@ -159,8 +182,13 @@ router.get("/", (req, res) => {
 </html>`);
 });
 
-router.get("/api/responses", (req, res) => {
-  res.json(responses);
+router.get("/api/responses", async (req, res) => {
+  try {
+    const rows = await getRecentResponses();
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ message: error.message || "Failed to load responses" });
+  }
 });
 
 router.get("/api/stream", (req, res) => {
@@ -214,7 +242,7 @@ router.post("/ivr", (req, res) => {
 /* ===============================
    3. HANDLE RESPONSE
 ================================ */
-router.post("/response", (req, res) => {
+router.post("/response", async (req, res) => {
   const body = req.body && typeof req.body === "object" ? req.body : {};
   const query = req.query && typeof req.query === "object" ? req.query : {};
   const digit = (body.Digits || body.digits || query.Digits || query.digits || "").toString().trim();
@@ -237,6 +265,48 @@ router.post("/response", (req, res) => {
   }
 
   addResponseLog({ from, digit: digit || "", status });
+
+  try {
+    const phoneCandidates = Array.from(new Set([
+      (from || "").trim(),
+      formatPhone(from),
+      formatPhone(from).replace(/^\+/, ""),
+      formatPhone(from).replace(/^\+91/, "")
+    ].filter(Boolean)));
+
+    let complaint = await Complaint.findOne({
+      citizen_phone: { $in: phoneCandidates },
+      verification_status: "PENDING"
+    }).sort({ resolved_at: -1, created_at: -1 });
+
+    if (!complaint) {
+      complaint = await Complaint.findOne({ citizen_phone: { $in: phoneCandidates } }).sort({ created_at: -1 });
+    }
+
+    if (complaint && ["1", "2"].includes(digit)) {
+      complaint.ivr_response = Number(digit);
+      complaint.ivr_metadata = {
+        ...complaint.ivr_metadata,
+        call_sid: body.CallSid || body.call_sid || complaint.ivr_metadata?.call_sid || null
+      };
+
+      if (digit === "1") {
+        complaint.status = "VERIFIED";
+        complaint.verification_status = "VERIFIED";
+        complaint.reopen_flag = 0;
+        complaint.verified_at = new Date();
+      } else if (digit === "2") {
+        complaint.status = "REOPENED";
+        complaint.verification_status = "REOPENED";
+        complaint.reopen_flag = 1;
+        complaint.verified_at = undefined;
+      }
+
+      await complaint.save();
+    }
+  } catch (error) {
+    console.error("❌ Failed to persist IVR response:", error.message);
+  }
 
   console.log("📞 User pressed:", digit || "(none)");
   console.log("📊 Status:", status);

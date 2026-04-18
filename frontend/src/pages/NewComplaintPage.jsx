@@ -2,9 +2,8 @@ import { CheckCircle2, LocateFixed, UploadCloud } from "lucide-react";
 import { useContext, useEffect, useState } from "react";
 import { AppContext } from "../App";
 import { createComplaint } from "../services/backendApi";
-import { departments } from "../services/mockData";
 
-const initialForm = { title: "", description: "", department: departments[0], location: "", image: null };
+const initialForm = { title: "", description: "", department: "", location: "", image: null };
 
 const LOCATION_ERROR_TEXT = "Location must be in 'lat, lng' format (example: 22.69050, 72.86175) or DMS format (example: 22°41'25.8\"N 72°51'42.3\"E).";
 
@@ -46,7 +45,7 @@ const parseLocationInput = (locationText) => {
 };
 
 function NewComplaintPage() {
-  const { addComplaint, user } = useContext(AppContext);
+  const { addComplaint, departmentOptions, user } = useContext(AppContext);
   const [step, setStep] = useState(1);
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState("");
@@ -67,6 +66,14 @@ function NewComplaintPage() {
 
     return () => URL.revokeObjectURL(objectUrl);
   }, [form.image]);
+
+  useEffect(() => {
+    if (form.department || !departmentOptions.length) {
+      return;
+    }
+
+    setForm((previous) => ({ ...previous, department: departmentOptions[0] }));
+  }, [departmentOptions, form.department]);
 
   const setField = (name, value) => {
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -188,9 +195,17 @@ function NewComplaintPage() {
           <div className="grid gap-4">
             <input type="text" placeholder="Complaint Title" value={form.title} onChange={(event) => setField("title", event.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900" />
             <textarea placeholder="Description" value={form.description} onChange={(event) => setField("description", event.target.value)} rows={5} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900" />
-            <select value={form.department} onChange={(event) => setField("department", event.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900">
-              {departments.map((dep) => <option key={dep}>{dep}</option>)}
-            </select>
+            <input
+              type="text"
+              placeholder="Department (for example: Road Maintenance)"
+              value={form.department}
+              onChange={(event) => setField("department", event.target.value)}
+              list="department-options"
+              className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900"
+            />
+            <datalist id="department-options">
+              {departmentOptions.map((dep) => <option key={dep} value={dep} />)}
+            </datalist>
             <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
               <input type="text" placeholder="Location (22.69050, 72.86175)" value={form.location} onChange={(event) => setField("location", event.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900" />
               <button type="button" onClick={fetchLocation} disabled={isLocating} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-60">

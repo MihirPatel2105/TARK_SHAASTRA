@@ -60,12 +60,22 @@ export function toUiComplaint(complaint) {
 
   return {
     id: complaint.id || complaint._id,
+    grievanceId: complaint.grievance_id || null,
     title: complaint.title,
     description: complaint.description,
     department: complaint.department,
+    grievanceType: complaint.grievance_type || null,
     status: titleCaseStatus(complaint.status),
+    verificationStatus: titleCaseStatus(complaint.verification_status),
+    source: complaint.source || "APP_TEXT",
+    locationStatus: complaint.location_status || "AVAILABLE",
     createdAt: created,
     resolvedAt: resolved,
+    createdById: complaint.created_by || null,
+    citizenEmail: complaint.citizen_email || null,
+    citizenPhone: complaint.citizen_phone || null,
+    assignedOfficerId: complaint.assigned_officer || null,
+    assignedToId: complaint.assigned_to || null,
     location: {
       lat: Number(lat || 0),
       lng: Number(lng || 0),
@@ -75,6 +85,12 @@ export function toUiComplaint(complaint) {
       ivrResponse: Number(complaint.ivr_response) === 2 ? "Yes" : "No",
       gpsMatch: Number(complaint.gps_match_flag) === 1,
       photoUploaded: Number(complaint.photo_uploaded) === 1
+    },
+    scoring: {
+      citizenPointsDelta: Number(complaint.scoring?.citizen_points_delta || 0),
+      departmentPointsDelta: Number(complaint.scoring?.department_points_delta || 0),
+      scoreReason: complaint.scoring?.score_reason || null,
+      fakeComplaintFlag: Number(complaint.scoring?.fake_complaint_flag || 0) === 1
     },
     timeline
   };
@@ -128,6 +144,7 @@ function toUiUser(user) {
     id: user.id || user._id,
     name: user.name,
     email: user.email,
+    phone: user.phone || null,
     role: normalizeRole(user.role),
     department: user.department || null,
     location: user.location,
@@ -201,6 +218,14 @@ export async function fetchNearbyComplaints({ lat, lng, radius = 2000, grievance
   }
 
   const response = await apiFetch(`${API_BASE_URL}/complaints/nearby?${params.toString()}`);
+  const data = await parseResponse(response);
+  return (data.complaints || []).map(toUiComplaint);
+}
+
+export async function fetchMyComplaints() {
+  const response = await apiFetch(`${API_BASE_URL}/complaints/mine`, {
+    headers: buildAuthHeaders()
+  });
   const data = await parseResponse(response);
   return (data.complaints || []).map(toUiComplaint);
 }
@@ -280,6 +305,27 @@ export async function fetchAdminDashboard(filters = {}) {
 export async function verifyAdminComplaint(complaintId, verificationStatus) {
   const body = verificationStatus ? { verification_status: verificationStatus } : {};
   const response = await apiFetch(`${API_BASE_URL}/admin/complaints/${complaintId}/verify`, {
+    method: "POST",
+    headers: buildAuthHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify(body)
+  });
+
+  const data = await parseResponse(response);
+  return toUiComplaint(data.complaint);
+}
+
+export async function submitIvrResponseForComplaint(complaintId, ivrResponse, transcriptText) {
+  const body = {
+    ivr_response: Number(ivrResponse)
+  };
+
+  if (transcriptText) {
+    body.transcript_text = transcriptText;
+  }
+
+  const response = await apiFetch(`${API_BASE_URL}/complaints/${complaintId}/ivr/response`, {
     method: "POST",
     headers: buildAuthHeaders({
       "Content-Type": "application/json"

@@ -51,7 +51,26 @@ export function getHomePath(role) {
 }
 
 export function loadStoredUser() {
-  return safeParse(localStorage.getItem(USER_KEY), null);
+  const user = safeParse(localStorage.getItem(USER_KEY), null);
+  if (!user) {
+    return null;
+  }
+
+  if (user.phone) {
+    return user;
+  }
+
+  const matchedDemoUser = demoUsers.find(
+    (item) => item.email.toLowerCase() === String(user.email || "").toLowerCase()
+  );
+
+  if (matchedDemoUser?.phone) {
+    const patched = { ...user, phone: matchedDemoUser.phone };
+    saveStoredUser(patched);
+    return patched;
+  }
+
+  return user;
 }
 
 export function saveStoredUser(user) {

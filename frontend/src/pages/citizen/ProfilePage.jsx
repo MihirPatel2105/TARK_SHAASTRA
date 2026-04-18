@@ -20,6 +20,15 @@ function ProfilePage() {
     return { total, verified, pending, reopened, earnedPoints };
   }, [myComplaints]);
 
+  const resolvedPhone = useMemo(() => {
+    if (user?.phone) {
+      return user.phone;
+    }
+
+    const complaintPhone = myComplaints.find((item) => item.citizenPhone)?.citizenPhone;
+    return complaintPhone || null;
+  }, [myComplaints, user?.phone]);
+
   const latest = myComplaints.slice(0, 5);
 
   return (
@@ -62,7 +71,7 @@ function ProfilePage() {
           </div>
           <div className="mt-5 space-y-3 text-sm text-slate-700">
             <p className="flex items-center gap-2"><Mail size={15} className="text-slate-500" /> {user?.email || "Not available"}</p>
-            <p className="flex items-center gap-2"><UserCircle2 size={15} className="text-slate-500" /> {user?.phone || "Mobile number not available"}</p>
+            <p className="flex items-center gap-2"><UserCircle2 size={15} className="text-slate-500" /> {resolvedPhone || "Mobile number not available"}</p>
             <p className="flex items-center gap-2"><ShieldCheck size={15} className="text-slate-500" /> Role: {user?.role || "Citizen"}</p>
             <p className="flex items-center gap-2"><MapPin size={15} className="text-slate-500" /> Department: {user?.department || "Citizen Services"}</p>
             <p className="flex items-center gap-2"><Activity size={15} className="text-slate-500" /> Points: {user?.points ?? 0}</p>
