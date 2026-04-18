@@ -13,6 +13,7 @@ const linksByRole = {
   Officer: [
     { to: "/officer/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { to: "/officer/profile", label: "Profile", icon: UserCircle2 },
+    { to: "/officer/map", label: "Complaints Map", icon: MapPinned },
     { to: "/officer/assigned", label: "Assigned Complaints", icon: ClipboardList },
     { to: "/officer/proof", label: "Upload Proof", icon: UploadCloud },
     { to: "/officer/verifications", label: "Pending Verifications", icon: ShieldCheck }
@@ -20,6 +21,7 @@ const linksByRole = {
   Admin: [
     { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { to: "/admin/profile", label: "Profile", icon: UserCircle2 },
+    { to: "/admin/map", label: "Complaints Map", icon: MapPinned },
     { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
     { to: "/admin/complaints", label: "Complaint Table", icon: UserCog }
   ]

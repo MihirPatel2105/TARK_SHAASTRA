@@ -1,11 +1,13 @@
 import { MapPin, RefreshCcw, SlidersHorizontal } from "lucide-react";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
-import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from "react-leaflet";
+import { CircleF, GoogleMap, MarkerF, useJsApiLoader } from "@react-google-maps/api";
 import { AppContext } from "../App";
 import { departments, statusOptions } from "../services/mockData";
 
 const DEFAULT_CENTER = { lat: 28.6139, lng: 77.209 };
 const NEARBY_RADIUS_KM = 3;
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
 
 function haversineKm(a, b) {
   const toRadians = (value) => (value * Math.PI) / 180;
@@ -20,37 +22,6 @@ function haversineKm(a, b) {
   return 2 * earthRadius * Math.asin(Math.sqrt(h));
 }
 
-function FitToComplaints({ complaints, currentLocation }) {
-  const map = useMap();
-
-  if (!complaints.length && !currentLocation) {
-    map.setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 11);
-    return null;
-  }
-
-  const bounds = complaints.map((item) => [Number(item.location?.lat || 0), Number(item.location?.lng || 0)]);
-  if (currentLocation) {
-    bounds.push([currentLocation.lat, currentLocation.lng]);
-  }
-
-  map.fitBounds(bounds, { padding: [24, 24], maxZoom: 15 });
-  return null;
-}
-
-function ResizeMapOnLayoutChange({ resizeToken }) {
-  const map = useMap();
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      map.invalidateSize();
-    }, 160);
-
-    return () => window.clearTimeout(timeout);
-  }, [map, resizeToken]);
-
-  return null;
-}
-
 function markerColor(status) {
   if (status === "Verified") return "#16a34a";
   if (status === "Resolved") return "#0284c7";
@@ -58,9 +29,10 @@ function markerColor(status) {
   return "#2563eb";
 }
 
-function MapPage() {
+function MapPage({ workspaceLabel = "Citizen Workspace" }) {
   const { complaints, syncNearbyComplaints } = useContext(AppContext);
   const mapShellRef = useRef(null);
+  const mapRef = useRef(null);
 
   const [department, setDepartment] = useState("All");
   const [status, setStatus] = useState("All");
@@ -72,6 +44,10 @@ function MapPage() {
   const [locationError, setLocationError] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentLocation, setCurrentLocation] = useState(null);
+
+  const { isLoaded, loadError } = useJsApiLoader({
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY || ""
+  });
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -128,6 +104,21 @@ function MapPage() {
     }
   };
 
+  const onMapLoad = (map) => {
+    mapRef.current = map;
+  };
+
+  const onMapUnmount = () => {
+    mapRef.current = null;
+  };
+
+  useEffect(() => {
+    if (!mapRef.current || !isLoaded) return;
+
+    window.google.maps.event.trigger(mapRef.current, "resize");
+    mapRef.current.setCenter(currentLocation || DEFAULT_CENTER);
+  }, [isFullscreen, currentLocation, isLoaded]);
+
   const loadNearbyFromBackend = async () => {
     setSyncMessage("");
     setSyncError("");
@@ -179,11 +170,53 @@ function MapPage() {
   }, [filtered, currentLocation]);
 
   const nearbyWithinRadius = nearbyRows.filter((item) => item.distanceKm <= NEARBY_RADIUS_KM);
+  const mapMarkers = useMemo(
+    () =>
+      filtered.map((item) => ({
+        ...item,
+        lat: Number(item.location?.lat || 0),
+        lng: Number(item.location?.lng || 0)
+      })),
+    [filtered]
+  );
+  const mapHeightClass = isFullscreen ? "h-screen" : "h-[70vh]";
+
+  useEffect(() => {
+    if (!mapRef.current || !isLoaded) return;
+
+    const bounds = new window.google.maps.LatLngBounds();
+    let hasPoints = false;
+
+    filtered.forEach((item) => {
+      const lat = Number(item.location?.lat || 0);
+      const lng = Number(item.location?.lng || 0);
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return;
+      }
+
+      bounds.extend({ lat, lng });
+      hasPoints = true;
+    });
+
+    if (currentLocation) {
+      bounds.extend(currentLocation);
+      hasPoints = true;
+    }
+
+    if (!hasPoints) {
+      mapRef.current.setCenter(DEFAULT_CENTER);
+      mapRef.current.setZoom(11);
+      return;
+    }
+
+    mapRef.current.fitBounds(bounds, 48);
+  }, [filtered, currentLocation, isLoaded]);
 
   return (
     <section className="space-y-6">
       <div>
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Citizen Workspace</p>
+        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">{workspaceLabel}</p>
         <h2 className="mt-2 text-3xl font-bold text-slate-900">Complaints Map</h2>
         <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-600">Track your live location, view nearby complaints in real map tiles, and monitor distances with clear, professional filtering.</p>
       </div>
@@ -210,6 +243,18 @@ function MapPage() {
         ) : null}
       </div>
 
+      {!GOOGLE_MAPS_API_KEY ? (
+        <div className="rounded-3xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+          Add VITE_GOOGLE_MAPS_API_KEY in frontend/.env to enable Google Maps.
+        </div>
+      ) : null}
+
+      {loadError ? (
+        <div className="rounded-3xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800">
+          Google Maps failed to load: {loadError.message}. Verify API key, allowed referrers (localhost), and enabled billing.
+        </div>
+      ) : null}
+
       <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-card sm:grid-cols-2">
         <label className="text-sm">
           <span className="mb-2 block font-semibold text-slate-700">Department</span>
@@ -234,51 +279,71 @@ function MapPage() {
 
       <div className="grid gap-5 xl:grid-cols-[1.5fr_0.9fr]">
         <div ref={mapShellRef} className="relative min-h-[420px] overflow-hidden rounded-[2rem] border border-slate-200 shadow-card">
-          <MapContainer center={[DEFAULT_CENTER.lat, DEFAULT_CENTER.lng]} zoom={11} className={isFullscreen ? "h-screen w-full" : "h-[70vh] w-full"}>
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            <FitToComplaints complaints={filtered} currentLocation={currentLocation} />
-            <ResizeMapOnLayoutChange resizeToken={`${isFullscreen}-${filtered.length}-${Boolean(currentLocation)}`} />
-
-            {currentLocation ? (
-              <CircleMarker
-                center={[currentLocation.lat, currentLocation.lng]}
-                pathOptions={{ color: "#0f172a", fillColor: "#0ea5e9", fillOpacity: 0.95 }}
-                radius={9}
+          {loadError ? (
+            <div className="flex h-[70vh] items-center justify-center px-6 text-center text-sm text-rose-700">
+              Google Maps failed to load. Check API key restrictions and billing, then restart Vite.
+            </div>
+          ) : isLoaded ? (
+            <div className={mapHeightClass}>
+              <GoogleMap
+                mapContainerStyle={MAP_CONTAINER_STYLE}
+                center={currentLocation || DEFAULT_CENTER}
+                zoom={11}
+                options={{
+                  mapTypeControl: false,
+                  streetViewControl: false,
+                  fullscreenControl: false,
+                  clickableIcons: false,
+                  gestureHandling: "greedy"
+                }}
+                onLoad={onMapLoad}
+                onUnmount={onMapUnmount}
+                onClick={() => setSelectedId(null)}
               >
-                <Popup>
-                  <div className="text-sm">
-                    <p className="font-semibold">Your Current Location</p>
-                    <p>{currentLocation.lat.toFixed(5)}, {currentLocation.lng.toFixed(5)}</p>
-                  </div>
-                </Popup>
-              </CircleMarker>
-            ) : null}
+                {currentLocation ? (
+                  <>
+                    <MarkerF position={currentLocation} title="Your Current Location" />
+                    <CircleF
+                      center={currentLocation}
+                      radius={NEARBY_RADIUS_KM * 1000}
+                      options={{
+                        fillColor: "#0ea5e9",
+                        fillOpacity: 0.12,
+                        strokeColor: "#0ea5e9",
+                        strokeOpacity: 0.6,
+                        strokeWeight: 2
+                      }}
+                    />
+                  </>
+                ) : null}
 
-            {filtered.map((item) => (
-              <CircleMarker
-                key={item.id}
-                center={[Number(item.location?.lat || 0), Number(item.location?.lng || 0)]}
-                pathOptions={{ color: markerColor(item.status), fillColor: markerColor(item.status), fillOpacity: 0.85 }}
-                radius={8}
-                eventHandlers={{ click: () => setSelectedId(item.id) }}
-              >
-                <Popup>
-                  <div className="text-sm">
-                    <p className="font-semibold">{item.title}</p>
-                    <p>{item.department}</p>
-                    <p>Status: {item.status}</p>
-                  </div>
-                </Popup>
-              </CircleMarker>
-            ))}
-          </MapContainer>
+                {mapMarkers.map((item) => (
+                  <MarkerF
+                    key={item.id}
+                    position={{ lat: item.lat, lng: item.lng }}
+                    onClick={() => setSelectedId(item.id)}
+                    title={item.title}
+                    icon={{
+                      path: window.google?.maps?.SymbolPath?.CIRCLE,
+                      fillColor: markerColor(item.status),
+                      fillOpacity: 1,
+                      strokeColor: "#ffffff",
+                      strokeWeight: 2,
+                      scale: 8
+                    }}
+                  />
+                ))}
+              </GoogleMap>
+            </div>
+          ) : (
+            <div className="flex h-[70vh] items-center justify-center px-6 text-center text-sm text-slate-500">
+              Loading Google Maps...
+            </div>
+          )}
 
           <div className="pointer-events-none absolute left-4 top-4 rounded-2xl bg-white/90 px-4 py-3 shadow-sm backdrop-blur">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-900"><SlidersHorizontal size={16} /> Live filters active</div>
-            <p className="mt-1 text-xs text-slate-500">OpenStreetMap live tiles with complaint markers</p>
+            <p className="mt-1 text-xs text-slate-500">Google Maps API with complaint markers</p>
           </div>
           <div className="pointer-events-none absolute bottom-4 right-4 rounded-2xl bg-white/90 px-4 py-3 text-xs font-semibold text-slate-500 shadow-sm backdrop-blur">Click marker to inspect complaint details</div>
         </div>

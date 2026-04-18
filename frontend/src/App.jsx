@@ -150,6 +150,7 @@ function App() {
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<OfficerDashboardPage />} />
           <Route path="profile" element={<OfficerProfilePage />} />
+          <Route path="map" element={<MapPage workspaceLabel="Officer Workspace" />} />
           <Route path="assigned" element={<OfficerAssignedComplaintsPage />} />
           <Route path="proof" element={<OfficerProofUploadPage />} />
           <Route path="verifications" element={<OfficerPendingVerificationsPage />} />
@@ -166,6 +167,7 @@ function App() {
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<AdminDashboardPage />} />
           <Route path="profile" element={<AdminProfilePage />} />
+          <Route path="map" element={<MapPage workspaceLabel="Admin Workspace" />} />
           <Route path="analytics" element={<AdminAnalyticsPage />} />
           <Route path="complaints" element={<AdminComplaintsPage />} />
         </Route>
