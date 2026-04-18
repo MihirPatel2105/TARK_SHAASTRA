@@ -1,8 +1,10 @@
-import { CheckCircle2, LocateFixed, PhoneCall, UploadCloud } from "lucide-react";
+import { CheckCircle2, LocateFixed, PhoneCall, UploadCloud, Sparkles } from "lucide-react";
 import { useContext, useEffect, useRef, useState } from "react";
 import { AppContext } from "../App";
-import { createComplaint } from "../services/backendApi";
-import { departmentOptions, grievanceTypes } from "../services/mockData";
+import { createComplaint, predictDepartment, predictComplaintDetails } from "../services/backendApi";
+import { departmentOptions } from "../services/mockData";
+import { getDistrictFromCoordinates } from "../utils/gujaratDistricts";
+import { useTranslation } from "../hooks/useTranslation";
 
 const initialForm = { title: "", description: "", department: "", grievanceType: "", location: "", image: null };
 const initialMode = "APP_IMAGE";
@@ -49,8 +51,18 @@ const parseLocationInput = (locationText) => {
 
 const toGrievanceTypeValue = (value) => String(value || "").trim().toLowerCase().replace(/\s+/g, "_");
 
+const buildFallbackTitle = (description) => {
+  const text = String(description || "").trim();
+  if (!text) {
+    return "Complaint Reported";
+  }
+  const compact = text.replace(/\s+/g, " ");
+  return compact.length > 60 ? `${compact.slice(0, 57)}...` : compact;
+};
+
 function NewComplaintPage() {
   const { addComplaint, refreshComplaints, user } = useContext(AppContext);
+  const { t } = useTranslation();
   const fileInputRef = useRef(null);
   const [mode, setMode] = useState(initialMode);
   const [form, setForm] = useState(initialForm);
@@ -59,12 +71,46 @@ function NewComplaintPage() {
   const [success, setSuccess] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
-
+  const [isPredictingDepartment, setIsPredictingDepartment] = useState(false);
+  const [predictedDepartment, setPredictedDepartment] = useState(null);
+  const [isPredictingDetails, setIsPredictingDetails] = useState(false);
+  const [imageDataUrl, setImageDataUrl] = useState("");
+  const [showConfirmation, setShowConfirmation] = useState(false);
   const [preview, setPreview] = useState("");
+
+  const predictAndSetDepartment = async (imageUrl, textContent) => {
+    setIsPredictingDepartment(true);
+    setPredictedDepartment(null);
+    
+    try {
+      const result = await predictDepartment(
+        imageUrl ? { imageUrl } : textContent ? { text: textContent } : null
+      );
+      
+      if (result?.predictedDepartment) {
+        setPredictedDepartment(result.predictedDepartment);
+        // Auto-populate the department field
+        setForm((prev) => ({
+          ...prev,
+          department: result.predictedDepartment
+        }));
+        return result.predictedDepartment;
+      }
+
+      return null;
+    } catch (err) {
+      console.error("Failed to predict department:", err);
+      return null;
+    } finally {
+      setIsPredictingDepartment(false);
+    }
+  };
 
   useEffect(() => {
     if (!form.image) {
       setPreview("");
+      setImageDataUrl("");
+      setPredictedDepartment(null);
       return;
     }
 
@@ -75,20 +121,25 @@ function NewComplaintPage() {
   }, [form.image]);
 
   useEffect(() => {
-    if (form.department || !departmentOptions.length) {
-      return;
+    if (mode === TEXT_MODE && form.description?.trim().length > 20) {
+      const timeoutId = setTimeout(() => {
+        predictAndSetDepartment(null, form.description);
+      }, 800);
+      
+      return () => clearTimeout(timeoutId);
     }
-
-    setForm((previous) => ({ ...previous, department: departmentOptions[0] }));
-  }, [departmentOptions, form.department]);
+  }, [form.description, mode]);
 
   useEffect(() => {
-    if (form.grievanceType || !grievanceTypes.length) {
-      return;
+    if (mode === "APP_IMAGE" && imageDataUrl && form.description?.trim().length >= 10) {
+      const timeoutId = setTimeout(() => {
+        predictAndSetDepartment(imageDataUrl);
+        predictAndSetDetails(imageDataUrl, form.description);
+      }, 800);
+      
+      return () => clearTimeout(timeoutId);
     }
-
-    setForm((previous) => ({ ...previous, grievanceType: grievanceTypes[0] }));
-  }, [form.grievanceType]);
+  }, [form.description, imageDataUrl, mode]);
 
   useEffect(() => {
     if (user?.phone && !contactPhone) {
@@ -146,13 +197,93 @@ function NewComplaintPage() {
     fileInputRef.current?.click();
   };
 
+  const handleImageSelection = (file) => {
+    setField("image", file);
+
+    if (!file) {
+      setImageDataUrl("");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setImageDataUrl(typeof reader.result === "string" ? reader.result : "");
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const predictAndSetDetails = async (imageUrl, description) => {
+    if (!imageUrl || !description || description.trim().length < 10) {
+      return { predictedTitle: null, predictedGrievanceType: null };
+    }
+
+    setIsPredictingDetails(true);
+    
+    try {
+      const result = await predictComplaintDetails(imageUrl, description);
+      
+      if (result?.predictedTitle || result?.predictedGrievanceType) {
+        setForm((prev) => ({
+          ...prev,
+          title: result.predictedTitle || prev.title,
+          grievanceType: result.predictedGrievanceType || prev.grievanceType
+        }));
+      }
+
+      return {
+        predictedTitle: result?.predictedTitle || null,
+        predictedGrievanceType: result?.predictedGrievanceType || null
+      };
+    } catch (err) {
+      console.error("Failed to predict complaint details:", err);
+      return { predictedTitle: null, predictedGrievanceType: null };
+    } finally {
+      setIsPredictingDetails(false);
+    }
+  };
+
+  const handleReviewAndSubmit = async () => {
+    // Predict department and details on submit click
+    try {
+      let predictedDepartmentValue = null;
+      let predictedTitleValue = null;
+      let predictedGrievanceTypeValue = null;
+
+      if (mode === "APP_IMAGE" && imageDataUrl) {
+        predictedDepartmentValue = await predictAndSetDepartment(imageDataUrl);
+        const predictedDetails = await predictAndSetDetails(imageDataUrl, form.description);
+        predictedTitleValue = predictedDetails?.predictedTitle || null;
+        predictedGrievanceTypeValue = predictedDetails?.predictedGrievanceType || null;
+      } else if (mode === "TEXT_MODE" && form.description?.trim().length > 0) {
+        predictedDepartmentValue = await predictAndSetDepartment(null, form.description);
+      }
+
+      // Ensure modal always shows non-empty values.
+      const nextTitle = predictedTitleValue || form.title || buildFallbackTitle(form.description);
+      const nextDepartment = predictedDepartmentValue || form.department || "General";
+      const nextGrievanceType = predictedGrievanceTypeValue || form.grievanceType || "general";
+
+      setForm((prev) => ({
+        ...prev,
+        title: nextTitle,
+        department: nextDepartment,
+        grievanceType: nextGrievanceType
+      }));
+
+      setShowConfirmation(true);
+    } catch (err) {
+      console.error("Error during prediction:", err);
+      setError("Failed to predict values. Please try again.");
+    }
+  };
+
   const submitComplaint = async () => {
     const grievanceType = toGrievanceTypeValue(form.grievanceType) || "general";
     const resolvedPhone = (user?.phone || contactPhone || "").trim();
     const parsedLocation = parseLocationInput(form.location);
 
-    if (!form.title || !form.description || !form.department || !form.grievanceType) {
-      setError("Please fill the complaint title, description, department, and grievance type.");
+    if (!form.description) {
+      setError("Please fill the description.");
       return;
     }
 
@@ -183,7 +314,7 @@ function NewComplaintPage() {
     try {
       const payload = {
         grievance_id: `GRV-${Date.now()}`,
-        title: mode === TEXT_MODE && !form.title.trim() ? `Text complaint - ${form.grievanceType}` : form.title,
+        title: form.title.trim() || (mode === TEXT_MODE ? `Text complaint - ${form.grievanceType}` : `Complaint - ${form.grievanceType}`),
         description: form.description,
         department: form.department,
         grievance_type: grievanceType,
@@ -195,6 +326,8 @@ function NewComplaintPage() {
         payload.lat = parsedLocation.lat;
         payload.lng = parsedLocation.lng;
         payload.image = form.image;
+        // Auto-assign district based on coordinates
+        payload.district = getDistrictFromCoordinates(parsedLocation.lat, parsedLocation.lng);
       } else {
         payload.citizen_phone = resolvedPhone;
         if (form.location?.trim()) {
@@ -206,7 +339,7 @@ function NewComplaintPage() {
 
       addComplaint(apiComplaint);
       await refreshComplaints();
-      setSuccess(mode === TEXT_MODE ? "Text complaint submitted successfully." : "Geo-tagged complaint submitted successfully.");
+      setSuccess(mode === TEXT_MODE ? t("Text complaint submitted successfully.") : t("Geo-tagged complaint submitted successfully."));
     } catch (submitError) {
       const suggestions = submitError?.payload?.duplicate_suggestions;
       if (Array.isArray(suggestions) && suggestions.length > 0) {
@@ -220,6 +353,7 @@ function NewComplaintPage() {
     }
 
     setForm(initialForm);
+    setImageDataUrl("");
     setContactPhone(user?.phone || "");
   };
 
@@ -227,8 +361,8 @@ function NewComplaintPage() {
     <section className="space-y-6">
       <div>
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Citizen Workspace</p>
-        <h2 className="mt-2 text-3xl font-bold text-slate-900">Register New Complaint</h2>
-        <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-600">Choose a complaint intake method. Geo-tagged image is best for field evidence, while text-based complaint accepts details without image upload.</p>
+        <h2 className="mt-2 text-3xl font-bold text-slate-900">{t("Register New Complaint")}</h2>
+        <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-600">{t("Choose a complaint intake method")}</p>
       </div>
 
       <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-card">
@@ -239,9 +373,9 @@ function NewComplaintPage() {
             className={`rounded-3xl border px-5 py-4 text-left transition ${mode === "APP_IMAGE" ? "border-blue-700 bg-blue-50 ring-1 ring-blue-700/20" : "border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100"}`}
           >
             <span className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">
-              <UploadCloud size={16} /> Add Geo-tagged image
+              <UploadCloud size={16} /> {t("Add Geo-tagged image")}
             </span>
-            <p className="mt-2 text-sm leading-6 text-slate-600">Upload an image and use location coordinates for a precise complaint submission.</p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">{t("Upload an image with AI auto-prediction")}</p>
           </button>
 
           <button
@@ -250,9 +384,9 @@ function NewComplaintPage() {
             className={`rounded-3xl border px-5 py-4 text-left transition ${mode === TEXT_MODE ? "border-blue-700 bg-blue-50 ring-1 ring-blue-700/20" : "border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100"}`}
           >
             <span className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">
-              <PhoneCall size={16} /> Text-based complaint
+              <PhoneCall size={16} /> {t("Text-based complaint")}
             </span>
-            <p className="mt-2 text-sm leading-6 text-slate-600">Register a complaint using text only. No image upload is needed.</p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">{t("Register a complaint using text only")}</p>
           </button>
         </div>
 
@@ -265,10 +399,10 @@ function NewComplaintPage() {
                 className="flex min-h-52 w-full flex-col items-center justify-center rounded-3xl border-2 border-dashed border-slate-300 bg-slate-50 p-6 text-center transition hover:border-blue-300 hover:bg-blue-50/40"
               >
                 <UploadCloud className="mb-3 text-slate-500" size={34} />
-                <span className="text-base font-semibold text-slate-900">Upload geo-tagged complaint image</span>
-                <span className="mt-1 text-sm text-slate-500">Image and location are mandatory for this mode.</span>
+                <span className="text-base font-semibold text-slate-900">{t("Upload geo-tagged complaint image")}</span>
+                <span className="mt-1 text-sm text-slate-500">{t("Image must contain GPS data for validation")}</span>
                 <span className="mt-4 inline-flex rounded-full bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-blue-700 shadow-sm">
-                  Choose Image
+                  {t("Choose Image")}
                 </span>
               </button>
               <input
@@ -276,52 +410,35 @@ function NewComplaintPage() {
                 type="file"
                 accept="image/*"
                 className="hidden"
-                onChange={(event) => setField("image", event.target.files?.[0] || null)}
+                onChange={(event) => handleImageSelection(event.target.files?.[0] || null)}
               />
 
-              {preview ? <img src={preview} alt="Complaint preview" className="h-56 w-full rounded-3xl object-cover" /> : null}
+              {preview ? (
+                <div>
+                  <img src={preview} alt="Complaint preview" className="h-56 w-full rounded-3xl object-cover" />
+                </div>
+              ) : null}
             </>
           ) : null}
 
           <div className="grid gap-4">
-            <input type="text" placeholder={mode === TEXT_MODE ? "Complaint title (optional for text complaint)" : "Complaint Title"} value={form.title} onChange={(event) => setField("title", event.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900" />
-            <textarea placeholder={mode === TEXT_MODE ? "Describe the complaint in text" : "Description"} value={form.description} onChange={(event) => setField("description", event.target.value)} rows={mode === TEXT_MODE ? 6 : 5} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900" />
-
-            <label className="text-sm font-medium text-slate-700">
-              <span className="mb-2 block font-semibold text-slate-700">Department</span>
-              <select
-                value={form.department}
-                onChange={(event) => setField("department", event.target.value)}
-                className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900"
-              >
-                {departmentOptions.map((dep) => (
-                  <option key={dep} value={dep}>
-                    {dep}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="text-sm font-medium text-slate-700">
-              <span className="mb-2 block font-semibold text-slate-700">Grievance Type</span>
-              <select
-                value={form.grievanceType}
-                onChange={(event) => setField("grievanceType", event.target.value)}
-                className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900"
-              >
-                {grievanceTypes.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-slate-700">{t("Description")} *</label>
+                <textarea 
+                  placeholder={t("Describe the issue in detail (min 10 characters)")} 
+                  value={form.description} 
+                  onChange={(event) => setField("description", event.target.value)} 
+                  rows={mode === TEXT_MODE ? 6 : 5} 
+                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900" 
+                />
+                <p className="mt-1 text-xs text-slate-500">{t("This is required for accurate complaint analysis")}</p>
+              </div>
 
             {mode === TEXT_MODE ? (
-              <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+              <div className="grid gap-3">
                 <input
                   type="tel"
-                  placeholder="Registered mobile number"
+                  placeholder={t("Registered mobile number")}
                   value={contactPhone}
                   onChange={(event) => {
                     setContactPhone(event.target.value);
@@ -330,15 +447,12 @@ function NewComplaintPage() {
                   }}
                   className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900"
                 />
-                <button type="button" onClick={() => setError("Location is optional for text-based intake. Add one only if you know it.")} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-300 px-4 py-3 font-semibold text-slate-700">
-                  <LocateFixed size={16} /> Optional Location
-                </button>
               </div>
             ) : (
               <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
                 <input type="text" placeholder="Location (22.69050, 72.86175)" value={form.location} onChange={(event) => setField("location", event.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900" />
                 <button type="button" onClick={fetchLocation} disabled={isLocating} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-60">
-                  <LocateFixed size={16} /> {isLocating ? "Locating..." : "Auto Locate"}
+                  <LocateFixed size={16} /> {isLocating ? t("Locating...") : t("Auto Locate")}
                 </button>
               </div>
             )}
@@ -349,12 +463,74 @@ function NewComplaintPage() {
 
             <div className="flex flex-wrap gap-3">
               <button type="button" onClick={() => setForm(initialForm)} className="rounded-2xl border border-slate-300 px-5 py-3 font-semibold text-slate-700">Reset</button>
-              <button type="button" onClick={submitComplaint} disabled={isSubmitting} className="rounded-2xl bg-emerald-700 px-5 py-3 font-semibold text-white shadow-lg shadow-emerald-700/20">
-                {isSubmitting ? "Submitting..." : mode === TEXT_MODE ? "Submit Text Complaint" : "Submit Geo-tagged Complaint"}
+              <button 
+                type="button" 
+                onClick={handleReviewAndSubmit}
+                disabled={
+                  isSubmitting || 
+                  (mode === "APP_IMAGE" && !form.image) ||
+                  isPredictingDepartment ||
+                  isPredictingDetails
+                } 
+                className="rounded-2xl bg-emerald-700 px-5 py-3 font-semibold text-white shadow-lg shadow-emerald-700/20 disabled:cursor-not-allowed disabled:opacity-60"
+                title={
+                  mode === "APP_IMAGE" && !form.image ? "Please upload an image first" :
+                  isPredictingDepartment || isPredictingDetails ? "Predicting... please wait" :
+                  ""
+                }
+              >
+                {isSubmitting ? "Submitting..." : "Review & Submit"}
               </button>
             </div>
           </div>
         </div>
+
+        {showConfirmation && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-md rounded-3xl bg-white shadow-2xl">
+              <div className="border-b border-slate-200 px-6 py-4">
+                <h3 className="text-xl font-bold text-slate-900">Confirm AI Predictions</h3>
+                <p className="mt-1 text-sm text-slate-600">Please review the AI-predicted values:</p>
+              </div>
+              
+              <div className="space-y-4 px-6 py-4">
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-sm font-semibold text-slate-600">Title</p>
+                  <p className="mt-1 text-base font-medium text-slate-900">{form.title}</p>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-sm font-semibold text-slate-600">Department</p>
+                  <p className="mt-1 text-base font-medium text-slate-900">{form.department}</p>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-sm font-semibold text-slate-600">Grievance Type</p>
+                  <p className="mt-1 text-base font-medium text-slate-900">{form.grievanceType}</p>
+                </div>
+              </div>
+              
+              <div className="flex gap-3 border-t border-slate-200 px-6 py-4">
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmation(false)}
+                  className="flex-1 rounded-2xl border border-slate-300 px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  No, Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowConfirmation(false);
+                    submitComplaint();
+                  }}
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-2xl bg-emerald-700 px-4 py-2 font-semibold text-white shadow-lg shadow-emerald-700/20 transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Yes, Submit
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {error ? <p className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
         {success ? <p className="mt-4 flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"><CheckCircle2 size={16} />{success}</p> : null}

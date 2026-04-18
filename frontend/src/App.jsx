@@ -1,6 +1,7 @@
 import { createContext, useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import RoleLayout from "./components/layout/RoleLayout";
+import { LanguageProvider } from "./context/LanguageContext";
 import { clearSession, getHomePath, loadAuthToken, loadStoredUser, normalizeRole, saveSession } from "./services/authStore";
 import { fetchAdminComplaints, fetchMyComplaints, fetchNearbyComplaints, fetchOfficerComplaints } from "./services/backendApi";
 import { departmentOptions, mockComplaints } from "./services/mockData";
@@ -177,8 +178,9 @@ function App() {
   );
 
   return (
-    <AppContext.Provider value={value}>
-      <Routes>
+    <LanguageProvider>
+      <AppContext.Provider value={value}>
+        <Routes>
         <Route path="/" element={<Navigate to={user ? getHomePath(user.role) : "/login"} replace />} />
         <Route path="/login" element={user ? <Navigate to={getHomePath(user.role)} replace /> : <LoginPage />} />
         <Route path="/signup" element={user ? <Navigate to={getHomePath(user.role)} replace /> : <SignupPage />} />
@@ -234,7 +236,8 @@ function App() {
 
         <Route path="*" element={<Navigate to={user ? getHomePath(user.role) : "/login"} replace />} />
       </Routes>
-    </AppContext.Provider>
+      </AppContext.Provider>
+    </LanguageProvider>
   );
 }
 

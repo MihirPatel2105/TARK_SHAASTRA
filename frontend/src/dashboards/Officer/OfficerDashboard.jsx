@@ -70,7 +70,7 @@ function OfficerDashboardPage() {
             Live refresh every 15s
           </p>
         </div>
-        <h1 className="mt-6 text-5xl font-bold leading-tight">Welcome, {user?.name || "Officer"}</h1>
+        <h1 className="mt-6 text-5xl font-bold leading-tight">Officer Dashboard</h1>
         <p className="mt-4 max-w-3xl text-lg leading-8 text-sky-100">Resolve assigned complaints, upload proof, and keep the verification queue moving without hiding the final accountability step.</p>
       </div>
 

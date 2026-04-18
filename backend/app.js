@@ -8,6 +8,7 @@ const authRoutes = require('./routes/authRoutes');
 const officerRoutes = require('./routes/officerRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
+const { translateText } = require('./controllers/complaintController');
 
 const app = express();
 
@@ -23,6 +24,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+app.post('/api/translate', translateText);
 app.use('/api/complaints', complaintRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);

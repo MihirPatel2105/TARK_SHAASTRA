@@ -13,6 +13,8 @@ router.get('/analytics', complaintController.analytics);
 router.get('/:id', complaintController.getComplaintById);
 router.post('/', protect, upload.single('image'), complaintController.createComplaint);
 router.post('/text', protect, complaintController.createTextComplaint);
+router.post('/predict-department', complaintController.predictDepartment);
+router.post('/predict-details', complaintController.predictComplaintDetails);
 router.post('/:id/vote', complaintController.voteOnComplaint);
 router.post('/:id/location', protect, complaintController.ingestLocationUpdate);
 router.post('/:id/resolve', upload.single('image'), complaintController.resolveComplaint);

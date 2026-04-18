@@ -33,7 +33,7 @@ function DashboardPage() {
       <section className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-blue-700 via-slate-900 to-cyan-700 p-8 text-white shadow-[0_20px_60px_rgba(15,23,42,0.12)] sm:p-10">
         <div className="max-w-3xl">
           <p className="inline-flex rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold">Citizen Workspace</p>
-          <h1 className="mt-6 text-5xl font-bold leading-tight">Welcome back, {user?.name || "Citizen"}</h1>
+          <h1 className="mt-6 text-5xl font-bold leading-tight">Citizen Dashboard</h1>
           <p className="mt-4 max-w-2xl text-lg leading-8 text-sky-100">
             File grievances, track status, and verify that every closure passes real-world checks before it is considered final.
           </p>

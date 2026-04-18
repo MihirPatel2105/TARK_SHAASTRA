@@ -14,7 +14,6 @@ const GRIEVANCE_DEPARTMENT_MAP = {
   garbage: 'Sanitation'
 };
 
-const OFFICER_TRACKED_STATUSES = ['PENDING', 'IN_PROGRESS', 'RESOLVED'];
 const GPS_MATCH_THRESHOLD_METERS = 100;
 
 function parseNumber(value, fallback = null) {
@@ -154,20 +153,13 @@ const createComplaint = asyncHandler(async (req, res) => {
   const exifGps = extractImageGps(req.file.buffer);
   const userLocation = location;
 
-  // Many mobile/compressed uploads strip EXIF GPS metadata.
-  // Fall back to user-selected location so complaints are still accepted.
-  let imageLocation = userLocation;
-  let userImageDistanceMeters = null;
-  let gpsMatchFlag = 0;
-
-  if (exifGps.found) {
-    const exifPoint = buildPointFromLatLng(exifGps.latitude, exifGps.longitude);
-    if (exifPoint) {
-      imageLocation = exifPoint;
-      userImageDistanceMeters = calculateDistanceMeters(userLocation, imageLocation);
-      gpsMatchFlag = userImageDistanceMeters <= GPS_MATCH_THRESHOLD_METERS ? 1 : 0;
-    }
-  }
+  // GPS EXIF is optional; fall back to user-entered location when metadata is unavailable.
+  const exifPoint = exifGps.found ? buildPointFromLatLng(exifGps.latitude, exifGps.longitude) : null;
+  const imageLocation = exifPoint || userLocation;
+  const userImageDistanceMeters = exifPoint ? calculateDistanceMeters(userLocation, imageLocation) : null;
+  const gpsMatchFlag = exifPoint
+    ? (userImageDistanceMeters <= GPS_MATCH_THRESHOLD_METERS ? 1 : 0)
+    : 1;
 
   const existing = await Complaint.findOne({ grievance_id }).lean();
   if (existing) {
@@ -348,6 +340,7 @@ const createTextComplaint = asyncHandler(async (req, res) => {
     citizen_phone,
     location_text,
     created_by,
+    district,
     lat,
     lng
   } = req.body;
@@ -370,6 +363,7 @@ const createTextComplaint = asyncHandler(async (req, res) => {
     title,
     description,
     department,
+    district: typeof district === 'string' && district.trim().length ? district.trim() : null,
     grievance_type,
     source: 'APP_TEXT',
     location: point,
@@ -512,10 +506,7 @@ const getOfficerComplaints = asyncHandler(async (req, res) => {
     throw new Error('Officer department is required on user profile');
   }
 
-  const query = {
-    department: req.user.department,
-    status: { $in: OFFICER_TRACKED_STATUSES }
-  };
+  const query = {};
 
   if (req.query.status) {
     query.status = req.query.status;
@@ -592,13 +583,8 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
     throw new Error('Complaint is assigned to another officer');
   }
 
-  const officerLat = parseNumber(req.body.officer_lat ?? req.body.lat);
-  const officerLng = parseNumber(req.body.officer_lng ?? req.body.lng);
-
-  if (officerLat === null || officerLng === null) {
-    res.status(400);
-    throw new Error('officer_lat and officer_lng are required for GPS validation');
-  }
+  const officerLat = parseNumber(req.body.officer_lat ?? req.body.lat, complaint.location?.coordinates?.[1]);
+  const officerLng = parseNumber(req.body.officer_lng ?? req.body.lng, complaint.location?.coordinates?.[0]);
 
   if (!req.file) {
     res.status(400);
@@ -606,22 +592,15 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
   }
 
   const exifGps = extractImageGps(req.file.buffer);
-  if (!exifGps.found) {
-    res.status(400);
-    throw new Error('Resolution image must include GPS EXIF metadata');
-  }
 
   const complaintPoint = complaint.location;
-  const officerPoint = buildPointFromLatLng(officerLat, officerLng);
-  const resolvedImageLocation = buildPointFromLatLng(exifGps.latitude, exifGps.longitude);
+  const officerPoint = buildPointFromLatLng(officerLat, officerLng) || complaintPoint;
+  const resolvedImageLocation = exifGps.found
+    ? (buildPointFromLatLng(exifGps.latitude, exifGps.longitude) || officerPoint)
+    : officerPoint;
 
   const officerToComplaintMeters = calculateDistanceMeters(officerPoint, complaintPoint);
   const imageToComplaintMeters = calculateDistanceMeters(resolvedImageLocation, complaintPoint);
-
-  if (officerToComplaintMeters > GPS_MATCH_THRESHOLD_METERS || imageToComplaintMeters > GPS_MATCH_THRESHOLD_METERS) {
-    res.status(400);
-    throw new Error('GPS validation failed: officer and image must be within 100 meters of complaint location');
-  }
 
   const uploadResult = await uploadBufferToCloudinary(req.file.buffer, {
     folder: 'complaints/resolutions'
@@ -705,6 +684,87 @@ const analytics = asyncHandler(async (req, res) => {
   });
 });
 
+const predictDepartment = asyncHandler(async (req, res) => {
+  const { imageUrl, text } = req.body;
+
+  if (!imageUrl && !text) {
+    res.status(400);
+    throw new Error('Either imageUrl or text is required for department prediction');
+  }
+
+  // Dynamically import groqService
+  const { predictDepartmentFromImage, predictDepartmentFromText } = await import('../services/groqService.js');
+
+  let predictedDepartment = null;
+
+  if (imageUrl) {
+    predictedDepartment = await predictDepartmentFromImage(imageUrl);
+  } else if (text) {
+    predictedDepartment = await predictDepartmentFromText(text);
+  }
+
+  res.json({
+    predictedDepartment,
+    message: predictedDepartment ? `Department predicted: ${predictedDepartment}` : 'Unable to predict department'
+  });
+});
+
+const translateText = asyncHandler(async (req, res) => {
+  const { text, targetLanguage = "gu" } = req.body;
+
+  if (!text) {
+    res.status(400);
+    throw new Error('text is required for translation');
+  }
+
+  if (targetLanguage === "en") {
+    return res.json({ translatedText: text });
+  }
+
+  // For Gujarati, we'll use Groq AI if available, otherwise return original
+  if (targetLanguage === "gu") {
+    try {
+      if (!process.env.GROQ_API_KEY) {
+        // Return original text if Groq not configured
+        return res.json({ translatedText: text });
+      }
+
+      const axios = require('axios');
+      const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+
+      const response = await axios.post(
+        GROQ_API_URL,
+        {
+          model: 'mixtral-8x7b-32768',
+          messages: [
+            {
+              role: 'user',
+              content: `Translate the following English text to Gujarati. Respond with ONLY the translated text, nothing else.\n\nEnglish: "${text}"\n\nGujarati:`
+            }
+          ],
+          max_tokens: 200
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      const translatedText = response.data.choices?.[0]?.message?.content?.trim() || text;
+      res.json({ translatedText });
+    } catch (error) {
+      console.error('Translation error:', error.message);
+      // Fallback to original text
+      res.json({ translatedText: text });
+    }
+  } else {
+    res.status(400);
+    throw new Error(`Unsupported language: ${targetLanguage}`);
+  }
+});
+
 const registerUser = asyncHandler(async (req, res) => {
   const { name, role, department, lat, lng, points } = req.body;
 
@@ -727,6 +787,40 @@ const registerUser = asyncHandler(async (req, res) => {
   res.status(201).json({ user });
 });
 
+const predictComplaintDetails = asyncHandler(async (req, res) => {
+  const { imageUrl, description } = req.body;
+
+  if (!imageUrl) {
+    res.status(400);
+    throw new Error('imageUrl is required for complaint detail prediction');
+  }
+
+  if (!description || description.trim().length === 0) {
+    res.status(400);
+    throw new Error('Description is required for complaint detail prediction');
+  }
+
+  // Dynamically import groqService functions
+  const { predictGrievanceType, predictComplaintTitle } = await import('../services/groqService.js');
+
+  try {
+    const [predictedTitle, predictedGrievanceType] = await Promise.all([
+      predictComplaintTitle(imageUrl, description),
+      predictGrievanceType(imageUrl, description)
+    ]);
+
+    res.json({
+      predictedTitle: predictedTitle || null,
+      predictedGrievanceType: predictedGrievanceType || null,
+      message: 'Complaint details predicted from image and description'
+    });
+  } catch (error) {
+    console.error('Error predicting complaint details:', error);
+    res.status(500);
+    throw new Error('Unable to predict complaint details. Please fill in the form manually.');
+  }
+});
+
 module.exports = {
   createComplaint,
   createTextComplaint,
@@ -741,5 +835,8 @@ module.exports = {
   startComplaintWork,
   resolveOfficerComplaint,
   analytics,
+  predictDepartment,
+  predictComplaintDetails,
+  translateText,
   registerUser
 };

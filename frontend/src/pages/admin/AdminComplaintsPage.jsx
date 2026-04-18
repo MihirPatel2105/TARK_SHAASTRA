@@ -10,15 +10,29 @@ function AdminComplaintsPage() {
   const [selectedId, setSelectedId] = useState(complaints[0]?.id || "");
   const [sourceFilter, setSourceFilter] = useState("ALL");
   const [locationFilter, setLocationFilter] = useState("ALL");
+  const [districtFilter, setDistrictFilter] = useState("ALL");
+  const [departmentFilter, setDepartmentFilter] = useState("ALL");
   const [actionError, setActionError] = useState("");
+
+  const districtOptions = useMemo(
+    () => Array.from(new Set(complaints.map((item) => item.district).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [complaints]
+  );
+
+  const departmentOptions = useMemo(
+    () => Array.from(new Set(complaints.map((item) => item.department).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [complaints]
+  );
 
   const filteredComplaints = useMemo(
     () => complaints.filter((item) => {
       const sourcePass = sourceFilter === "ALL" || item.source === sourceFilter;
       const locationPass = locationFilter === "ALL" || item.locationStatus === locationFilter;
-      return sourcePass && locationPass;
+      const districtPass = districtFilter === "ALL" || item.district === districtFilter;
+      const departmentPass = departmentFilter === "ALL" || item.department === departmentFilter;
+      return sourcePass && locationPass && districtPass && departmentPass;
     }),
-    [complaints, sourceFilter, locationFilter]
+    [complaints, sourceFilter, locationFilter, districtFilter, departmentFilter]
   );
 
   const selected = useMemo(
@@ -49,7 +63,7 @@ function AdminComplaintsPage() {
         <p className="mt-2 text-sm leading-7 text-slate-600">Click a row to inspect verification details and complaint timeline.</p>
       </div>
 
-      <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-card sm:grid-cols-2">
+      <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-card sm:grid-cols-2 lg:grid-cols-4">
         <label className="text-sm">
           <span className="mb-2 block font-semibold text-slate-700">Source</span>
           <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900">
@@ -68,6 +82,26 @@ function AdminComplaintsPage() {
             <option value="NEEDS_LOCATION">NEEDS_LOCATION</option>
           </select>
         </label>
+
+        <label className="text-sm">
+          <span className="mb-2 block font-semibold text-slate-700">District</span>
+          <select value={districtFilter} onChange={(event) => setDistrictFilter(event.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900">
+            <option value="ALL">All</option>
+            {districtOptions.map((district) => (
+              <option key={district} value={district}>{district}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className="text-sm">
+          <span className="mb-2 block font-semibold text-slate-700">Department</span>
+          <select value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900">
+            <option value="ALL">All</option>
+            {departmentOptions.map((department) => (
+              <option key={department} value={department}>{department}</option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr]">
@@ -79,6 +113,7 @@ function AdminComplaintsPage() {
                 <th className="px-4 py-4 font-semibold">Title</th>
                 <th className="px-4 py-4 font-semibold">Source</th>
                 <th className="px-4 py-4 font-semibold">Department</th>
+                <th className="px-4 py-4 font-semibold">District</th>
                 <th className="px-4 py-4 font-semibold">Location Status</th>
                 <th className="px-4 py-4 font-semibold">GPS</th>
                 <th className="px-4 py-4 font-semibold">Photo</th>
@@ -92,6 +127,7 @@ function AdminComplaintsPage() {
                   <td className="px-4 py-4 text-slate-900">{complaint.title}</td>
                   <td className="px-4 py-4 text-slate-600">{complaint.source || "APP_TEXT"}</td>
                   <td className="px-4 py-4 text-slate-600">{complaint.department}</td>
+                  <td className="px-4 py-4 text-slate-600">{complaint.district || "Unknown"}</td>
                   <td className="px-4 py-4 text-slate-600">{complaint.locationStatus || "AVAILABLE"}</td>
                   <td className="px-4 py-4 text-slate-600">{complaint.verification?.gpsMatch ? "✔" : "✖"}</td>
                   <td className="px-4 py-4 text-slate-600">{complaint.verification?.photoUploaded ? "✔" : "✖"}</td>
@@ -109,6 +145,7 @@ function AdminComplaintsPage() {
                 <div>
                   <h3 className="text-2xl font-semibold text-slate-900">{selected.title}</h3>
                   <p className="mt-1 text-sm text-slate-500">{selected.department}</p>
+                  <p className="mt-1 text-sm text-slate-500">{selected.district || "Unknown district"}</p>
                 </div>
                 <StatusBadge status={selected.status} />
               </div>

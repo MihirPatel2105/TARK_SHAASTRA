@@ -49,6 +49,15 @@ const UserSchema = new Schema(
     points: {
       type: Number,
       default: 0
+    },
+    passwordResetOtpHash: {
+      type: String,
+      default: null,
+      select: false
+    },
+    passwordResetOtpExpiresAt: {
+      type: Date,
+      default: null
     }
   },
   {

@@ -1,7 +1,9 @@
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const asyncHandler = require('../utils/asyncHandler');
 const User = require('../models/User');
+const { sendEmail } = require('../services/emailService');
 
 function parseNumber(value, fallback = null) {
   if (value === undefined || value === null || value === '') {
@@ -30,6 +32,34 @@ function createToken(userId) {
   return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
     expiresIn: '7d'
   });
+}
+
+function normalizeEmail(email) {
+  return String(email || '').toLowerCase().trim();
+}
+
+function generateOtp() {
+  return String(crypto.randomInt(100000, 1000000));
+}
+
+async function hashOtp(otp) {
+  return bcrypt.hash(String(otp), 10);
+}
+
+function buildResetEmail({ name, otp }) {
+  return {
+    subject: 'Your password reset OTP',
+    text: `Hello ${name || 'user'},\n\nYour password reset OTP is ${otp}. It will expire in 10 minutes.\n\nIf you did not request this, ignore this email.`,
+    html: `
+      <div style="font-family: Arial, sans-serif; color: #0f172a; line-height: 1.6;">
+        <h2 style="margin-bottom: 12px;">Password Reset OTP</h2>
+        <p>Hello ${name || 'user'},</p>
+        <p>Your password reset OTP is <strong style="font-size: 24px; letter-spacing: 4px;">${otp}</strong>.</p>
+        <p>This code will expire in 10 minutes.</p>
+        <p>If you did not request this, you can safely ignore this email.</p>
+      </div>
+    `
+  };
 }
 
 function sanitizeUser(user) {
@@ -116,10 +146,93 @@ const login = asyncHandler(async (req, res) => {
   });
 });
 
+const requestPasswordResetOtp = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    res.status(400);
+    throw new Error('email is required');
+  }
+
+  const normalizedEmail = normalizeEmail(email);
+  const user = await User.findOne({ email: normalizedEmail });
+
+  if (!user) {
+    res.json({
+      message: 'If the email exists, a password reset OTP has been sent.'
+    });
+    return;
+  }
+
+  const otp = generateOtp();
+  const passwordResetOtpHash = await hashOtp(otp);
+  const passwordResetOtpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+  user.passwordResetOtpHash = passwordResetOtpHash;
+  user.passwordResetOtpExpiresAt = passwordResetOtpExpiresAt;
+  await user.save();
+
+  await sendEmail({
+    to: user.email,
+    ...buildResetEmail({ name: user.name, otp })
+  });
+
+  res.json({
+    message: 'Password reset OTP has been sent to your email.'
+  });
+});
+
+const resetPasswordWithOtp = asyncHandler(async (req, res) => {
+  const { email, otp, password, confirmPassword } = req.body;
+
+  if (!email || !otp || !password || !confirmPassword) {
+    res.status(400);
+    throw new Error('email, otp, password, and confirmPassword are required');
+  }
+
+  if (password !== confirmPassword) {
+    res.status(400);
+    throw new Error('Password and confirm password do not match');
+  }
+
+  const normalizedEmail = normalizeEmail(email);
+  const user = await User.findOne({ email: normalizedEmail }).select('+passwordHash +passwordResetOtpHash +passwordResetOtpExpiresAt');
+
+  if (!user || !user.passwordResetOtpHash || !user.passwordResetOtpExpiresAt) {
+    res.status(400);
+    throw new Error('OTP is invalid or expired');
+  }
+
+  if (user.passwordResetOtpExpiresAt.getTime() < Date.now()) {
+    user.passwordResetOtpHash = null;
+    user.passwordResetOtpExpiresAt = null;
+    await user.save();
+    res.status(400);
+    throw new Error('OTP is expired. Please request a new one.');
+  }
+
+  const otpMatches = await bcrypt.compare(String(otp), user.passwordResetOtpHash);
+  if (!otpMatches) {
+    res.status(400);
+    throw new Error('OTP is invalid or expired');
+  }
+
+  user.passwordHash = await bcrypt.hash(password, 10);
+  user.passwordResetOtpHash = null;
+  user.passwordResetOtpExpiresAt = null;
+  await user.save();
+
+  res.json({
+    message: 'Password updated successfully'
+  });
+});
+
 module.exports = {
   signup,
   signupCitizen: signup,
   login,
+  requestPasswordResetOtp,
+  resetPasswordWithOtp,
   createToken,
   sanitizeUser
 };

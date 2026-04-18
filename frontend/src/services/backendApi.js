@@ -19,6 +19,23 @@ function buildUnavailableResponse() {
   );
 }
 
+export async function predictComplaintDetails(imageUrl, description) {
+  const response = await apiFetch(`${API_BASE_URL}/complaints/predict-details`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ imageUrl, description })
+  });
+
+  try {
+    return await parseResponse(response);
+  } catch (error) {
+    console.error("Complaint details prediction error:", error.message);
+    return { predictedTitle: null, predictedGrievanceType: null, error: error.message };
+  }
+}
+
 function cloneComplaint(complaint) {
   return {
     ...complaint,
@@ -97,6 +114,7 @@ function createLocalComplaintFromPayload(payload) {
     title: payload.title,
     description: payload.description,
     department: payload.department,
+    district: payload.district || null,
     grievanceType,
     status: "Pending",
     verificationStatus: "Pending",
@@ -215,6 +233,7 @@ export function toUiComplaint(complaint) {
     title: complaint.title,
     description: complaint.description,
     department: complaint.department,
+      district: complaint.district || null,
     grievanceType: complaint.grievance_type || null,
     status: titleCaseStatus(complaint.status),
     verificationStatus: titleCaseStatus(complaint.verification_status),
@@ -326,6 +345,38 @@ export async function loginUser(payload) {
     message: data?.message,
     token: data?.token,
     user: toUiUser(data?.user)
+  };
+}
+
+export async function requestPasswordResetOtp(payload) {
+  const response = await apiFetch(`${API_BASE_URL}/auth/forgot-password/request-otp`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await parseResponse(response);
+
+  return {
+    message: data?.message
+  };
+}
+
+export async function resetPasswordWithOtp(payload) {
+  const response = await apiFetch(`${API_BASE_URL}/auth/forgot-password/reset-password`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await parseResponse(response);
+
+  return {
+    message: data?.message
   };
 }
 
@@ -472,9 +523,12 @@ export async function fetchOfficerComplaints(status) {
   } catch (error) {
     return fallbackIfServerError(
       error,
-      loadLocalComplaints()
-        .filter((complaint) => !status || normalizeGrievanceType(complaint.status) === normalizeGrievanceType(status) || String(complaint.status || "").toLowerCase() === String(status || "").toLowerCase())
-        .filter((complaint) => ["Pending", "In Progress", "Resolved"].includes(complaint.status))
+      loadLocalComplaints().filter(
+        (complaint) =>
+          !status ||
+          normalizeGrievanceType(complaint.status) === normalizeGrievanceType(status) ||
+          String(complaint.status || "").toLowerCase() === String(status || "").toLowerCase()
+      )
     );
   }
 }
@@ -592,3 +646,19 @@ export async function verifyAdminComplaint(complaintId, verificationStatus) {
   }
 }
 
+export async function predictDepartment(payload) {
+  const response = await apiFetch(`${API_BASE_URL}/complaints/predict-department`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  try {
+    return await parseResponse(response);
+  } catch (error) {
+    console.error("Department prediction error:", error.message);
+    return { predictedDepartment: null, error: error.message };
+  }
+}
