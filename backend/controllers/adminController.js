@@ -61,6 +61,14 @@ function buildAdminFilter(query) {
     filter.verification_status = query.verification_status;
   }
 
+  if (query.source) {
+    filter.source = query.source;
+  }
+
+  if (query.location_status) {
+    filter.location_status = query.location_status;
+  }
+
   const reopenFlag = parseBooleanFlag(query.reopen_flag);
   if (reopenFlag !== null) {
     filter.reopen_flag = reopenFlag;
@@ -133,16 +141,21 @@ function buildMapOverlay(complaint) {
 function toCSVRows(items) {
   const headers = [
     'grievance_id',
+    'source',
     'title',
     'district',
     'department',
     'grievance_type',
     'status',
     'verification_status',
+    'location_status',
     'reopen_flag',
     'gps_match_flag',
     'ivr_response',
     'votes',
+    'citizen_points_delta',
+    'department_points_delta',
+    'fake_complaint_flag',
     'created_at'
   ];
 
@@ -161,16 +174,21 @@ function toCSVRows(items) {
 
   const rows = items.map((item) => [
     item.grievance_id,
+    item.source,
     item.title,
     item.district,
     item.department,
     item.grievance_type,
     item.status,
     item.verification_status,
+    item.location_status,
     item.reopen_flag,
     item.gps_match_flag,
     item.ivr_response,
     item.votes,
+    item.scoring?.citizen_points_delta,
+    item.scoring?.department_points_delta,
+    item.scoring?.fake_complaint_flag,
     item.created_at
   ].map(escapeCSV).join(','));
 
@@ -462,15 +480,36 @@ const verifyAdminComplaint = asyncHandler(async (req, res) => {
   complaint.verification_status = verificationStatus;
   complaint.reopen_flag = verificationStatus === 'REOPENED' ? 1 : 0;
 
+  if (!complaint.scoring) {
+    complaint.scoring = {
+      citizen_points_delta: 0,
+      department_points_delta: 0,
+      score_reason: null,
+      fake_complaint_flag: 0
+    };
+  }
+
   if (verificationStatus === 'VERIFIED') {
     complaint.status = 'VERIFIED';
     complaint.verified_at = new Date();
+    complaint.scoring.citizen_points_delta = 10;
+    complaint.scoring.department_points_delta = 5;
+    complaint.scoring.score_reason = 'VERIFIED_RESOLUTION';
+    complaint.scoring.fake_complaint_flag = 0;
   } else if (verificationStatus === 'FAILED') {
     complaint.status = 'FAILED';
     complaint.verified_at = undefined;
+    complaint.scoring.citizen_points_delta = -15;
+    complaint.scoring.department_points_delta = 0;
+    complaint.scoring.score_reason = 'FAKE_OR_INVALID_COMPLAINT';
+    complaint.scoring.fake_complaint_flag = 1;
   } else {
     complaint.status = 'REOPENED';
     complaint.verified_at = undefined;
+    complaint.scoring.citizen_points_delta = -5;
+    complaint.scoring.department_points_delta = -5;
+    complaint.scoring.score_reason = 'REOPENED_AFTER_VERIFICATION';
+    complaint.scoring.fake_complaint_flag = 0;
   }
 
   await complaint.save();

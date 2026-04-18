@@ -31,6 +31,15 @@ app.use('/api/officer', officerRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/ivr', ivrRoutes);
 
+try {
+  // Keep backend usable when optional IVR/Twilio dependencies are not installed.
+  // eslint-disable-next-line global-require
+  const { ivrRouter } = require('./IVR/iver');
+  app.use('/', ivrRouter);
+} catch (error) {
+  console.warn('IVR routes disabled:', error.message);
+}
+
 app.use(notFound);
 app.use(errorHandler);
 

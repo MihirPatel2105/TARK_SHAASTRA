@@ -1,9 +1,10 @@
-import { FileCheck2, ListChecks, MapPinned, PlusCircle, LayoutDashboard, ShieldCheck, ClipboardList, BarChart3, UploadCloud, UserCog } from "lucide-react";
+import { FileCheck2, ListChecks, MapPinned, PlusCircle, LayoutDashboard, ShieldCheck, ClipboardList, BarChart3, UploadCloud, UserCog, UserCircle2, LocateFixed } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 const linksByRole = {
   Citizen: [
     { to: "/citizen/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { to: "/citizen/profile", label: "Profile", icon: UserCircle2 },
     { to: "/citizen/map", label: "View Complaints on Map", icon: MapPinned },
     { to: "/citizen/new-complaint", label: "New Complaint", icon: PlusCircle },
     { to: "/citizen/track", label: "Track Complaint", icon: ListChecks },
@@ -11,12 +12,17 @@ const linksByRole = {
   ],
   Officer: [
     { to: "/officer/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { to: "/officer/profile", label: "Profile", icon: UserCircle2 },
+    { to: "/officer/map", label: "Complaints Map", icon: MapPinned },
     { to: "/officer/assigned", label: "Assigned Complaints", icon: ClipboardList },
+    { to: "/officer/needs-location", label: "Needs Location / IVR", icon: LocateFixed },
     { to: "/officer/proof", label: "Upload Proof", icon: UploadCloud },
     { to: "/officer/verifications", label: "Pending Verifications", icon: ShieldCheck }
   ],
   Admin: [
     { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { to: "/admin/profile", label: "Profile", icon: UserCircle2 },
+    { to: "/admin/map", label: "Complaints Map", icon: MapPinned },
     { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
     { to: "/admin/complaints", label: "Complaint Table", icon: UserCog }
   ]

@@ -37,6 +37,7 @@ function sanitizeUser(user) {
     id: user._id,
     name: user.name,
     email: user.email,
+    phone: user.phone || null,
     role: user.role,
     department: user.department,
     location: user.location,
@@ -46,23 +47,29 @@ function sanitizeUser(user) {
 }
 
 const signup = asyncHandler(async (req, res) => {
-  const { name, email, password, lat, lng } = req.body;
+  const { name, email, password, phone, lat, lng } = req.body;
 
-  if (!name || !email || !password) {
+  if (!name || !email || !password || !phone) {
     res.status(400);
-    throw new Error('name, email, and password are required');
+    throw new Error('name, email, phone, and password are required');
   }
 
-  const existingUser = await User.findOne({ email: String(email).toLowerCase().trim() }).lean();
+  const normalizedEmail = String(email).toLowerCase().trim();
+  const normalizedPhone = String(phone).trim();
+
+  const existingUser = await User.findOne({
+    $or: [{ email: normalizedEmail }, { phone: normalizedPhone }]
+  }).lean();
   if (existingUser) {
     res.status(409);
-    throw new Error('User with this email already exists');
+    throw new Error('User with this email or mobile number already exists');
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
   const user = await User.create({
     name,
-    email: String(email).toLowerCase().trim(),
+    email: normalizedEmail,
+    phone: normalizedPhone,
     passwordHash,
     role: 'citizen',
     location: buildPointFromBody({ lat, lng }),

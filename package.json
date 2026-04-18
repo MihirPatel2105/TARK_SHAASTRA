@@ -1,0 +1,16 @@
+{
+  "name": "tark-shaastra-workspace",
+  "private": true,
+  "version": "1.0.0",
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "scripts": {
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "start": "npm run dev",
+    "start:backend": "npm --prefix backend start",
+    "dev:backend": "npm --prefix backend run dev"
+  }
+}

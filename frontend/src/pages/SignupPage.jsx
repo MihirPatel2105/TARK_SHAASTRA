@@ -5,7 +5,7 @@ import { AppContext } from "../App";
 import { getHomePath } from "../services/authStore";
 import { signupCitizen } from "../services/backendApi";
 
-const initialForm = { name: "", email: "", password: "" };
+const initialForm = { name: "", email: "", phone: "", password: "" };
 
 function SignupPage() {
   const navigate = useNavigate();
@@ -21,7 +21,7 @@ function SignupPage() {
 
   const onSubmit = async (event) => {
     event.preventDefault();
-    if (!form.name || !form.email || !form.password) {
+    if (!form.name || !form.email || !form.phone || !form.password) {
       setError("Complete every field before continuing.");
       return;
     }
@@ -36,6 +36,7 @@ function SignupPage() {
       const session = await signupCitizen({
         name: form.name.trim(),
         email: form.email.trim().toLowerCase(),
+        phone: form.phone.trim(),
         password: form.password
       });
 
@@ -102,6 +103,15 @@ function SignupPage() {
               type="email"
               placeholder="Email"
               value={form.email}
+              onChange={onChange}
+              className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 placeholder:text-slate-400"
+            />
+            <input
+              name="phone"
+              type="tel"
+              inputMode="numeric"
+              placeholder="Mobile number"
+              value={form.phone}
               onChange={onChange}
               className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 placeholder:text-slate-400"
             />

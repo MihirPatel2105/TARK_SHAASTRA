@@ -14,8 +14,14 @@ const UserSchema = new Schema(
       required: true,
       unique: true,
       lowercase: true,
+      trim: true
+    },
+    phone: {
+      type: String,
       trim: true,
-      index: true
+      default: null,
+      unique: true,
+      sparse: true
     },
     passwordHash: {
       type: String,
@@ -59,6 +65,5 @@ const UserSchema = new Schema(
 
 UserSchema.index({ location: '2dsphere' });
 UserSchema.index({ role: 1, department: 1 });
-UserSchema.index({ email: 1 }, { unique: true });
 
 module.exports = mongoose.model('User', UserSchema);
