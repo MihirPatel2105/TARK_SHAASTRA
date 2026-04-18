@@ -4,6 +4,7 @@ import Modal from "../../components/Modal";
 import StatusBadge from "../../components/StatusBadge";
 import Timeline from "../../components/Timeline";
 import VerificationIndicator from "../../components/VerificationIndicator";
+import { verifyAdminComplaint } from "../../services/backendApi";
 
 function AdminComplaintsPage() {
   const { complaints, updateComplaint } = useContext(AppContext);
@@ -11,6 +12,7 @@ function AdminComplaintsPage() {
   const [showIvr, setShowIvr] = useState(false);
   const [sourceFilter, setSourceFilter] = useState("ALL");
   const [locationFilter, setLocationFilter] = useState("ALL");
+  const [actionError, setActionError] = useState("");
 
   const filteredComplaints = useMemo(
     () => complaints.filter((item) => {
@@ -40,6 +42,34 @@ function AdminComplaintsPage() {
       timeline: [...(selected.timeline || []), { label: `IVR Response: ${ivrResponse}`, date }]
     });
     setShowIvr(false);
+  };
+
+  const applyVerificationDecision = async (status) => {
+    if (!selected?.id) {
+      return;
+    }
+
+    setActionError("");
+
+    try {
+      const updated = await verifyAdminComplaint(selected.id, status);
+      updateComplaint(selected.id, {
+        status: updated.status,
+        verification: updated.verification,
+        scoring: updated.scoring,
+        source: updated.source,
+        locationStatus: updated.locationStatus,
+        timeline: [
+          ...(selected.timeline || []),
+          {
+            label: `Admin decision: ${status}`,
+            date: new Date().toISOString().slice(0, 10)
+          }
+        ]
+      });
+    } catch (error) {
+      setActionError(error.message || "Unable to update admin decision.");
+    }
   };
 
   return (
@@ -126,6 +156,9 @@ function AdminComplaintsPage() {
                 <p className="mt-2 text-sm text-slate-600">IVR response: {selected.verification?.ivrResponse || "No"}</p>
                 <p className="text-sm text-slate-600">GPS match: {selected.verification?.gpsMatch ? "Yes" : "No"}</p>
                 <p className="text-sm text-slate-600">Photo proof: {selected.verification?.photoUploaded ? "Yes" : "No"}</p>
+                <p className="mt-2 text-sm text-slate-600">Citizen points delta: {selected.scoring?.citizenPointsDelta ?? 0}</p>
+                <p className="text-sm text-slate-600">Department points delta: {selected.scoring?.departmentPointsDelta ?? 0}</p>
+                <p className="text-sm text-slate-600">Fake complaint flag: {selected.scoring?.fakeComplaintFlag ? "Yes" : "No"}</p>
               </div>
 
               <div>
@@ -134,6 +167,12 @@ function AdminComplaintsPage() {
               </div>
 
               <button type="button" onClick={() => setShowIvr(true)} className="rounded-2xl bg-blue-700 px-5 py-3 font-semibold text-white shadow-lg shadow-blue-700/20">Launch IVR Simulation</button>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => applyVerificationDecision("VERIFIED")} className="rounded-2xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Mark Verified</button>
+                <button type="button" onClick={() => applyVerificationDecision("REOPENED")} className="rounded-2xl bg-amber-700 px-4 py-2 text-sm font-semibold text-white">Mark Reopened</button>
+                <button type="button" onClick={() => applyVerificationDecision("FAILED")} className="rounded-2xl bg-rose-700 px-4 py-2 text-sm font-semibold text-white">Mark Fake / Failed</button>
+              </div>
+              {actionError ? <p className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{actionError}</p> : null}
             </>
           ) : null}
         </aside>

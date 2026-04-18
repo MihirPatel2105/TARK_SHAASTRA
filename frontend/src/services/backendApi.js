@@ -83,6 +83,12 @@ export function toUiComplaint(complaint) {
       gpsMatch: Number(complaint.gps_match_flag) === 1,
       photoUploaded: Number(complaint.photo_uploaded) === 1
     },
+    scoring: {
+      citizenPointsDelta: Number(complaint.scoring?.citizen_points_delta || 0),
+      departmentPointsDelta: Number(complaint.scoring?.department_points_delta || 0),
+      fakeComplaintFlag: Number(complaint.scoring?.fake_complaint_flag || 0),
+      scoreReason: complaint.scoring?.score_reason || null
+    },
     timeline
   };
 }

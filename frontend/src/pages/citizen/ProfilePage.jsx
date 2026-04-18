@@ -15,8 +15,9 @@ function ProfilePage() {
     const verified = myComplaints.filter((item) => item.status === "Verified").length;
     const pending = myComplaints.filter((item) => item.status === "Pending" || item.status === "Resolved").length;
     const reopened = myComplaints.filter((item) => item.status === "Reopened" || item.status === "Failed").length;
+    const earnedPoints = myComplaints.reduce((sum, item) => sum + Number(item.scoring?.citizenPointsDelta || 0), 0);
 
-    return { total, verified, pending, reopened };
+    return { total, verified, pending, reopened, earnedPoints };
   }, [myComplaints]);
 
   const latest = myComplaints.slice(0, 5);
@@ -45,6 +46,11 @@ function ProfilePage() {
         <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-card">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Needs Attention</p>
           <p className="mt-2 text-3xl font-bold text-rose-700">{stats.reopened}</p>
+        </article>
+        <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-card md:col-span-2 xl:col-span-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Points Summary</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">{Number(user?.points || 0) + stats.earnedPoints}</p>
+          <p className="mt-1 text-sm text-slate-600">Base profile points: {Number(user?.points || 0)} | Workflow score delta: {stats.earnedPoints}</p>
         </article>
       </div>
 

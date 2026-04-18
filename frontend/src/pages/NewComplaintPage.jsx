@@ -23,6 +23,7 @@ function NewComplaintPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [queueMessage, setQueueMessage] = useState("");
 
   const [preview, setPreview] = useState("");
 
@@ -42,6 +43,7 @@ function NewComplaintPage() {
     setForm((prev) => ({ ...prev, [name]: value }));
     setError("");
     setSuccess("");
+    setQueueMessage("");
   };
 
   const fetchLocation = () => {
@@ -122,6 +124,10 @@ function NewComplaintPage() {
           ? "Geo-tagged image complaint submitted successfully."
           : "Text complaint submitted successfully. If location is missing, it will move to IVR follow-up queue."
       );
+
+      if (apiComplaint.locationStatus && apiComplaint.locationStatus !== "AVAILABLE") {
+        setQueueMessage(`Location status is ${apiComplaint.locationStatus}. Officer/IVR location follow-up is now required.`);
+      }
     } catch (submitError) {
       const suggestions = submitError?.payload?.duplicate_suggestions;
       if (Array.isArray(suggestions) && suggestions.length > 0) {
@@ -237,6 +243,7 @@ function NewComplaintPage() {
 
         {error ? <p className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
         {success ? <p className="mt-4 flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"><CheckCircle2 size={16} />{success}</p> : null}
+        {queueMessage ? <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{queueMessage}</p> : null}
       </div>
     </section>
   );

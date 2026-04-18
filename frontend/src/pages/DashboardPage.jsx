@@ -19,6 +19,8 @@ function DashboardPage() {
   const verifiedCount = citizenComplaints.filter((item) => item.status === "Verified").length;
   const reopenedCount = citizenComplaints.filter((item) => item.status === "Reopened" || item.status === "Failed").length;
   const pendingCount = citizenComplaints.filter((item) => item.status === "Pending" || item.status === "Resolved").length;
+  const pointsFromComplaints = citizenComplaints.reduce((sum, item) => sum + Number(item.scoring?.citizenPointsDelta || 0), 0);
+  const totalCitizenPoints = Number(user?.points || 0) + pointsFromComplaints;
 
   const featureCards = [
     { icon: ShieldCheck, title: "Verification First", description: "No case is treated as final until IVR, GPS, and photo checks align.", color: "bg-blue-50 text-blue-700" },
@@ -46,7 +48,7 @@ function DashboardPage() {
       <section className="grid gap-4 md:grid-cols-3">
         <MetricCard label="My Complaints" value={citizenComplaints.length} helper="Complaints linked to your account" accent="blue" />
         <MetricCard label="Verified" value={verifiedCount} helper="Closed after validation" accent="green" />
-        <MetricCard label="Pending or Reopened" value={pendingCount + reopenedCount} helper="Needs your attention" accent="yellow" />
+        <MetricCard label="Citizen Points" value={totalCitizenPoints} helper="Rewards and penalties from outcomes" accent="yellow" />
       </section>
 
       <section className="grid gap-4 md:grid-cols-3">
