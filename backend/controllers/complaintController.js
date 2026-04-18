@@ -4,6 +4,7 @@ const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const { uploadBufferToCloudinary } = require('../services/cloudinaryService');
 const { haversineDistanceMeters } = require('../utils/geo');
+const { extractImageGps } = require('../utils/imageGps');
 
 const GRIEVANCE_DEPARTMENT_MAP = {
   pothole: 'Roads',
@@ -13,6 +14,7 @@ const GRIEVANCE_DEPARTMENT_MAP = {
 };
 
 const OFFICER_TRACKED_STATUSES = ['PENDING', 'IN_PROGRESS', 'RESOLVED'];
+const GPS_MATCH_THRESHOLD_METERS = 100;
 
 function parseNumber(value, fallback = null) {
   if (value === undefined || value === null || value === '') {
@@ -35,6 +37,21 @@ function buildPointFromBody(body) {
     type: 'Point',
     coordinates: [lng, lat]
   };
+}
+
+function buildPointFromLatLng(lat, lng) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+
+  return {
+    type: 'Point',
+    coordinates: [lng, lat]
+  };
+}
+
+function calculateDistanceMeters(pointA, pointB) {
+  return haversineDistanceMeters(pointA.coordinates, pointB.coordinates);
 }
 
 function normalizeDepartment(department) {
@@ -106,6 +123,7 @@ const createComplaint = asyncHandler(async (req, res) => {
     title,
     description,
     department: departmentInput,
+    district,
     grievance_type,
     lat,
     lng,
@@ -131,6 +149,22 @@ const createComplaint = asyncHandler(async (req, res) => {
     throw new Error('lat and lng are required');
   }
 
+  if (!req.file) {
+    res.status(400);
+    throw new Error('Complaint image is required');
+  }
+
+  const exifGps = extractImageGps(req.file.buffer);
+  if (!exifGps.found) {
+    res.status(400);
+    throw new Error('Complaint image must include GPS EXIF metadata');
+  }
+
+  const imageLocation = buildPointFromLatLng(exifGps.latitude, exifGps.longitude);
+  const userLocation = location;
+  const userImageDistanceMeters = calculateDistanceMeters(userLocation, imageLocation);
+  const gpsMatchFlag = userImageDistanceMeters <= GPS_MATCH_THRESHOLD_METERS ? 1 : 0;
+
   const existing = await Complaint.findOne({ grievance_id }).lean();
   if (existing) {
     res.status(409);
@@ -148,14 +182,12 @@ const createComplaint = asyncHandler(async (req, res) => {
   let imageUrl;
   let imagePublicId;
 
-  if (req.file) {
-    const uploadResult = await uploadBufferToCloudinary(req.file.buffer, {
-      folder: 'complaints'
-    });
+  const uploadResult = await uploadBufferToCloudinary(req.file.buffer, {
+    folder: 'complaints'
+  });
 
-    imageUrl = uploadResult.secure_url;
-    imagePublicId = uploadResult.public_id;
-  }
+  imageUrl = uploadResult.secure_url;
+  imagePublicId = uploadResult.public_id;
 
   const fallbackOfficer = mongoose.Types.ObjectId.isValid(assign_officer_id)
     ? null
@@ -166,8 +198,11 @@ const createComplaint = asyncHandler(async (req, res) => {
     title,
     description,
     department,
+    district: typeof district === 'string' && district.trim().length ? district.trim() : null,
     grievance_type,
     location,
+    user_location: userLocation,
+    image_location: imageLocation,
     image_url: imageUrl,
     image_public_id: imagePublicId,
     status: 'PENDING',
@@ -178,13 +213,19 @@ const createComplaint = asyncHandler(async (req, res) => {
     assigned_officer: mongoose.Types.ObjectId.isValid(assign_officer_id)
       ? assign_officer_id
       : fallbackOfficer?._id,
-    gps_match_flag: 1,
-    photo_uploaded: req.file ? 1 : 0,
+    verification_status: 'PENDING',
+    reopen_flag: 0,
+    gps_match_flag: gpsMatchFlag,
+    photo_uploaded: 1,
     ivr_response: 0
   });
 
   res.status(201).json({
     message: 'Complaint created successfully',
+    gps_validation: {
+      user_image_distance_meters: Math.round(userImageDistanceMeters),
+      gps_match_flag: gpsMatchFlag
+    },
     complaint: serializeComplaint(complaint.toObject())
   });
 });
@@ -302,6 +343,8 @@ const resolveComplaint = asyncHandler(async (req, res) => {
   complaint.gps_match_flag = parseNumber(gps_match_flag, complaint.gps_match_flag);
   complaint.photo_uploaded = parseNumber(photo_uploaded, req.file ? 1 : complaint.photo_uploaded);
   complaint.status = complaint.ivr_response === 2 || complaint.gps_match_flag === 0 || complaint.photo_uploaded === 0 ? 'REOPENED' : 'VERIFIED';
+  complaint.verification_status = complaint.status === 'VERIFIED' ? 'VERIFIED' : 'REOPENED';
+  complaint.reopen_flag = complaint.status === 'REOPENED' ? 1 : 0;
   complaint.resolved_at = new Date();
   complaint.verified_at = complaint.status === 'VERIFIED' ? new Date() : undefined;
 
@@ -412,23 +455,41 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
     throw new Error('Resolution proof image is required');
   }
 
+  const exifGps = extractImageGps(req.file.buffer);
+  if (!exifGps.found) {
+    res.status(400);
+    throw new Error('Resolution image must include GPS EXIF metadata');
+  }
+
+  const complaintPoint = complaint.location;
+  const officerPoint = buildPointFromLatLng(officerLat, officerLng);
+  const resolvedImageLocation = buildPointFromLatLng(exifGps.latitude, exifGps.longitude);
+
+  const officerToComplaintMeters = calculateDistanceMeters(officerPoint, complaintPoint);
+  const imageToComplaintMeters = calculateDistanceMeters(resolvedImageLocation, complaintPoint);
+
+  if (officerToComplaintMeters > GPS_MATCH_THRESHOLD_METERS || imageToComplaintMeters > GPS_MATCH_THRESHOLD_METERS) {
+    res.status(400);
+    throw new Error('GPS validation failed: officer and image must be within 100 meters of complaint location');
+  }
+
   const uploadResult = await uploadBufferToCloudinary(req.file.buffer, {
     folder: 'complaints/resolutions'
   });
 
-  const distanceMeters = haversineDistanceMeters(
-    [officerLng, officerLat],
-    complaint.location.coordinates
-  );
-  const gpsMatchFlag = distanceMeters <= 100 ? 1 : 0;
+  const gpsMatchFlag = 1;
 
   complaint.status = 'RESOLVED';
   complaint.assigned_to = req.user._id;
   complaint.assigned_officer = req.user._id;
   complaint.resolved_image = uploadResult.secure_url;
   complaint.resolved_image_public_id = uploadResult.public_id;
+  complaint.resolved_user_location = officerPoint;
+  complaint.resolved_image_location = resolvedImageLocation;
   complaint.photo_uploaded = 1;
   complaint.gps_match_flag = gpsMatchFlag;
+  complaint.verification_status = 'PENDING';
+  complaint.reopen_flag = 0;
   complaint.resolved_at = new Date();
   await complaint.save();
 
@@ -442,7 +503,10 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
   res.json({
     message: 'Complaint resolved by officer',
     gps_match_flag: gpsMatchFlag,
-    distance_meters: Math.round(distanceMeters),
+    distance_meters: {
+      officer_to_complaint: Math.round(officerToComplaintMeters),
+      image_to_complaint: Math.round(imageToComplaintMeters)
+    },
     complaint: serializeComplaint(complaint.toObject())
   });
 });

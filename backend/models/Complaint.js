@@ -25,6 +25,12 @@ const ComplaintSchema = new Schema(
       required: true,
       trim: true
     },
+    district: {
+      type: String,
+      trim: true,
+      default: null,
+      index: true
+    },
     grievance_type: {
       type: String,
       required: true,
@@ -40,6 +46,50 @@ const ComplaintSchema = new Schema(
       coordinates: {
         type: [Number],
         required: true
+      }
+    },
+    user_location: {
+      type: {
+        type: String,
+        enum: ['Point'],
+        default: 'Point'
+      },
+      coordinates: {
+        type: [Number],
+        default: undefined
+      }
+    },
+    image_location: {
+      type: {
+        type: String,
+        enum: ['Point'],
+        default: 'Point'
+      },
+      coordinates: {
+        type: [Number],
+        default: undefined
+      }
+    },
+    resolved_user_location: {
+      type: {
+        type: String,
+        enum: ['Point'],
+        default: 'Point'
+      },
+      coordinates: {
+        type: [Number],
+        default: undefined
+      }
+    },
+    resolved_image_location: {
+      type: {
+        type: String,
+        enum: ['Point'],
+        default: 'Point'
+      },
+      coordinates: {
+        type: [Number],
+        default: undefined
       }
     },
     image_url: {
@@ -58,6 +108,18 @@ const ComplaintSchema = new Schema(
       type: String,
       enum: ['PENDING', 'IN_PROGRESS', 'RESOLVED', 'VERIFIED', 'FAILED', 'REOPENED'],
       default: 'PENDING',
+      index: true
+    },
+    verification_status: {
+      type: String,
+      enum: ['PENDING', 'VERIFIED', 'FAILED', 'REOPENED'],
+      default: 'PENDING',
+      index: true
+    },
+    reopen_flag: {
+      type: Number,
+      enum: [0, 1],
+      default: 0,
       index: true
     },
     votes: {
@@ -112,5 +174,6 @@ ComplaintSchema.index({ location: '2dsphere' });
 ComplaintSchema.index({ location: '2dsphere', grievance_type: 1 });
 ComplaintSchema.index({ votes: -1, created_at: -1 });
 ComplaintSchema.index({ department: 1, status: 1, created_at: -1 });
+ComplaintSchema.index({ district: 1, department: 1, verification_status: 1, created_at: -1 });
 
 module.exports = mongoose.model('Complaint', ComplaintSchema);
