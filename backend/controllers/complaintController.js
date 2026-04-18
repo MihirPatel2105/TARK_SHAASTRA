@@ -152,15 +152,22 @@ const createComplaint = asyncHandler(async (req, res) => {
   }
 
   const exifGps = extractImageGps(req.file.buffer);
-  if (!exifGps.found) {
-    res.status(400);
-    throw new Error('Complaint image must include GPS EXIF metadata');
-  }
-
-  const imageLocation = buildPointFromLatLng(exifGps.latitude, exifGps.longitude);
   const userLocation = location;
-  const userImageDistanceMeters = calculateDistanceMeters(userLocation, imageLocation);
-  const gpsMatchFlag = userImageDistanceMeters <= GPS_MATCH_THRESHOLD_METERS ? 1 : 0;
+
+  // Many mobile/compressed uploads strip EXIF GPS metadata.
+  // Fall back to user-selected location so complaints are still accepted.
+  let imageLocation = userLocation;
+  let userImageDistanceMeters = null;
+  let gpsMatchFlag = 0;
+
+  if (exifGps.found) {
+    const exifPoint = buildPointFromLatLng(exifGps.latitude, exifGps.longitude);
+    if (exifPoint) {
+      imageLocation = exifPoint;
+      userImageDistanceMeters = calculateDistanceMeters(userLocation, imageLocation);
+      gpsMatchFlag = userImageDistanceMeters <= GPS_MATCH_THRESHOLD_METERS ? 1 : 0;
+    }
+  }
 
   const existing = await Complaint.findOne({ grievance_id }).lean();
   if (existing) {
@@ -246,7 +253,7 @@ const createComplaint = asyncHandler(async (req, res) => {
       ai: classification
     },
     gps_validation: {
-      user_image_distance_meters: Math.round(userImageDistanceMeters),
+      user_image_distance_meters: Number.isFinite(userImageDistanceMeters) ? Math.round(userImageDistanceMeters) : null,
       gps_match_flag: gpsMatchFlag
     },
     complaint: serializeComplaint(complaint.toObject())

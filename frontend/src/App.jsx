@@ -3,10 +3,12 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import RoleLayout from "./components/layout/RoleLayout";
 import { clearSession, getHomePath, loadStoredUser, normalizeRole, saveSession } from "./services/authStore";
 import { fetchNearbyComplaints } from "./services/backendApi";
+import { mockComplaints } from "./services/mockData";
 import LoginPage from "./pages/auth/LoginPage";
 import SignupPage from "./pages/auth/SignupPage";
 import CitizenDashboardPage from "./dashboards/Citizen/CitizenDashboard";
 import MapPage from "./pages/citizen/MapPage";
+import ProfilePage from "./pages/citizen/ProfilePage";
 import NewComplaintPage from "./pages/citizen/NewComplaintPage";
 import TrackComplaintPage from "./pages/citizen/TrackComplaintPage";
 import ResolvedComplaintsPage from "./pages/citizen/ResolvedComplaintsPage";
@@ -15,9 +17,11 @@ import OfficerDashboardPage from "./dashboards/Officer/OfficerDashboard";
 import OfficerAssignedComplaintsPage from "./pages/officer/OfficerAssignedComplaintsPage";
 import OfficerProofUploadPage from "./pages/officer/OfficerProofUploadPage";
 import OfficerPendingVerificationsPage from "./pages/officer/OfficerPendingVerificationsPage";
+import OfficerProfilePage from "./pages/officer/ProfilePage";
 import AdminDashboardPage from "./dashboards/Admin/AdminDashboard";
 import AdminAnalyticsPage from "./pages/admin/AdminAnalyticsPage";
 import AdminComplaintsPage from "./pages/admin/AdminComplaintsPage";
+import AdminProfilePage from "./pages/admin/ProfilePage";
 
 export const AppContext = createContext(null);
 
@@ -46,7 +50,22 @@ const ProtectedRoute = ({ user, allowedRoles, children }) => {
 
 function App() {
   const [user, setUser] = useState(() => loadStoredUser());
-  const [complaints, setComplaints] = useState(() => loadLocal(COMPLAINTS_KEY, []));
+  const [complaints, setComplaints] = useState(() => {
+    const storedComplaints = loadLocal(COMPLAINTS_KEY, null);
+    if (Array.isArray(storedComplaints) && storedComplaints.length > 0) {
+      return storedComplaints;
+    }
+
+    // Seed static records once so dashboards and tables are not empty on first run.
+    const seededComplaints = mockComplaints.map((item) => ({
+      ...item,
+      location: item.location ? { ...item.location } : undefined,
+      verification: item.verification ? { ...item.verification } : undefined,
+      timeline: Array.isArray(item.timeline) ? item.timeline.map((entry) => ({ ...entry })) : []
+    }));
+    localStorage.setItem(COMPLAINTS_KEY, JSON.stringify(seededComplaints));
+    return seededComplaints;
+  });
 
   const persistComplaints = useCallback((nextComplaintsOrUpdater) => {
     setComplaints((previous) => {
@@ -112,6 +131,7 @@ function App() {
         >
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<CitizenDashboardPage />} />
+          <Route path="profile" element={<ProfilePage />} />
           <Route path="map" element={<MapPage />} />
           <Route path="new-complaint" element={<NewComplaintPage />} />
           <Route path="track" element={<TrackComplaintPage />} />
@@ -129,6 +149,7 @@ function App() {
         >
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<OfficerDashboardPage />} />
+          <Route path="profile" element={<OfficerProfilePage />} />
           <Route path="assigned" element={<OfficerAssignedComplaintsPage />} />
           <Route path="proof" element={<OfficerProofUploadPage />} />
           <Route path="verifications" element={<OfficerPendingVerificationsPage />} />
@@ -144,6 +165,7 @@ function App() {
         >
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<AdminDashboardPage />} />
+          <Route path="profile" element={<AdminProfilePage />} />
           <Route path="analytics" element={<AdminAnalyticsPage />} />
           <Route path="complaints" element={<AdminComplaintsPage />} />
         </Route>
