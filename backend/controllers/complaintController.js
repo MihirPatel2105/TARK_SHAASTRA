@@ -4,7 +4,6 @@ const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const { uploadBufferToCloudinary } = require('../services/cloudinaryService');
 const { classifyImageByAllModels } = require('../services/roboflowService');
-const { triggerComplaintVerificationCall, triggerLocationCollectionCall } = require('../services/ivrBridgeService');
 const { haversineDistanceMeters } = require('../utils/geo');
 const { extractImageGps } = require('../utils/imageGps');
 
@@ -17,64 +16,6 @@ const GRIEVANCE_DEPARTMENT_MAP = {
 
 const OFFICER_TRACKED_STATUSES = ['PENDING', 'IN_PROGRESS', 'RESOLVED'];
 const GPS_MATCH_THRESHOLD_METERS = 100;
-const COMPLAINT_SOURCE_ENUM = ['APP_IMAGE', 'APP_TEXT', 'IVR_CALL'];
-
-function normalizeSource(value, fallback = 'APP_TEXT') {
-  const raw = typeof value === 'string' ? value.trim().toUpperCase() : '';
-  return COMPLAINT_SOURCE_ENUM.includes(raw) ? raw : fallback;
-}
-
-function inferDepartmentFromText(text) {
-  if (!text || typeof text !== 'string') {
-    return null;
-  }
-
-  const normalized = text.toLowerCase();
-
-  if (/pothole|road|street|asphalt|traffic/.test(normalized)) {
-    return 'Roads';
-  }
-
-  if (/water|leak|pipeline|drain|sewer/.test(normalized)) {
-    return 'Water';
-  }
-
-  if (/electric|power|transformer|line|current/.test(normalized)) {
-    return 'Electricity';
-  }
-
-  if (/garbage|waste|sanitation|trash|clean/.test(normalized)) {
-    return 'Sanitation';
-  }
-
-  return null;
-}
-
-function inferGrievanceTypeFromText(text) {
-  if (!text || typeof text !== 'string') {
-    return null;
-  }
-
-  const normalized = text.toLowerCase();
-
-  if (/pothole|road|street|asphalt/.test(normalized)) {
-    return 'Pothole';
-  }
-
-  if (/leak|pipeline|water|sewer|drain/.test(normalized)) {
-    return 'Leakage';
-  }
-
-  if (/power|electric|transformer|line/.test(normalized)) {
-    return 'Power Cut';
-  }
-
-  if (/garbage|waste|trash|sanitation/.test(normalized)) {
-    return 'Garbage';
-  }
-
-  return 'General';
-}
 
 function parseNumber(value, fallback = null) {
   if (value === undefined || value === null || value === '') {
@@ -136,42 +77,6 @@ function resolveDepartment(departmentInput, grievanceType) {
   return normalizeDepartment(departmentInput) || inferDepartmentFromGrievanceType(grievanceType);
 }
 
-function normalizeDepartmentKey(value) {
-  return String(value || '').trim().toLowerCase();
-}
-
-function getDepartmentVariants(department) {
-  const key = normalizeDepartmentKey(department);
-
-  if (/road/.test(key)) {
-    return ['Roads', 'Road Maintenance'];
-  }
-
-  if (/water/.test(key)) {
-    return ['Water', 'Water Supply'];
-  }
-
-  if (/electric|power/.test(key)) {
-    return ['Electricity', 'Power'];
-  }
-
-  if (/sanitation|garbage|waste/.test(key)) {
-    return ['Sanitation'];
-  }
-
-  return department ? [department] : [];
-}
-
-function isDepartmentMatch(officerDepartment, complaintDepartment) {
-  if (!officerDepartment || !complaintDepartment) {
-    return false;
-  }
-
-  return getDepartmentVariants(officerDepartment)
-    .map((item) => normalizeDepartmentKey(item))
-    .includes(normalizeDepartmentKey(complaintDepartment));
-}
-
 async function getNearbyComplaintsByLocation(point, radiusMeters, grievanceType) {
   const complaints = await Complaint.find({
     grievance_type: grievanceType,
@@ -225,42 +130,28 @@ const createComplaint = asyncHandler(async (req, res) => {
     lng,
     created_by,
     assign_officer_id,
-    force_create,
-    source: sourceInput,
-    location_text,
-    citizen_email,
-    citizen_phone
+    force_create
   } = req.body;
 
-  if (!grievance_id || !grievance_type) {
+  if (!grievance_id || !title || !description || !grievance_type) {
     res.status(400);
-    throw new Error('grievance_id and grievance_type are required');
+    throw new Error('grievance_id, title, description, and grievance_type are required');
   }
 
-  const source = normalizeSource(sourceInput, req.file ? 'APP_IMAGE' : 'APP_TEXT');
-
-  if (!req.file && (!description || !String(description).trim())) {
-    res.status(400);
-    throw new Error('Either image or description is required to create a complaint');
-  }
-
-  const complaintDescription = typeof description === 'string' && description.trim().length
-    ? description.trim()
-    : 'Complaint created without description';
-
-  const complaintTitle = typeof title === 'string' && title.trim().length
-    ? title.trim()
-    : `${grievance_type} complaint`;
-
-  const fallbackDepartment =
-    resolveDepartment(departmentInput, grievance_type) ||
-    inferDepartmentFromText(complaintDescription);
+  const fallbackDepartment = resolveDepartment(departmentInput, grievance_type);
 
   const location = buildPointFromBody(req.body);
-  const hasLocation = Boolean(location);
-  const locationStatus = hasLocation ? 'AVAILABLE' : 'MISSING';
+  if (!location) {
+    res.status(400);
+    throw new Error('lat and lng are required');
+  }
 
-  const exifGps = req.file ? extractImageGps(req.file.buffer) : { found: false };
+  if (!req.file) {
+    res.status(400);
+    throw new Error('Complaint image is required');
+  }
+
+  const exifGps = extractImageGps(req.file.buffer);
   const userLocation = location;
 
   // Many mobile/compressed uploads strip EXIF GPS metadata.
@@ -284,30 +175,25 @@ const createComplaint = asyncHandler(async (req, res) => {
     throw new Error('Complaint with this grievance_id already exists');
   }
 
-  if (hasLocation) {
-    const nearbyComplaints = await getNearbyComplaintsByLocation(location, 500, grievance_type);
-    if (nearbyComplaints.length > 0 && !['true', true, 1, '1'].includes(force_create)) {
-      return res.status(409).json({
-        message: 'A similar complaint already exists nearby. Vote on the existing complaint instead.',
-        duplicate_suggestions: nearbyComplaints.map(serializeComplaint)
-      });
-    }
+  const nearbyComplaints = await getNearbyComplaintsByLocation(location, 500, grievance_type);
+  if (nearbyComplaints.length > 0 && !['true', true, 1, '1'].includes(force_create)) {
+    return res.status(409).json({
+      message: 'A similar complaint already exists nearby. Vote on the existing complaint instead.',
+      duplicate_suggestions: nearbyComplaints.map(serializeComplaint)
+    });
   }
 
   let imageUrl;
   let imagePublicId;
 
-  let classification = null;
-  if (req.file) {
-    const uploadResult = await uploadBufferToCloudinary(req.file.buffer, {
-      folder: 'complaints'
-    });
+  const uploadResult = await uploadBufferToCloudinary(req.file.buffer, {
+    folder: 'complaints'
+  });
 
-    imageUrl = uploadResult.secure_url;
-    imagePublicId = uploadResult.public_id;
-    classification = await classifyImageByAllModels(imageUrl);
-  }
+  imageUrl = uploadResult.secure_url;
+  imagePublicId = uploadResult.public_id;
 
+  const classification = await classifyImageByAllModels(imageUrl);
   const aiDepartment = classification?.best?.decision === 'AUTO_ASSIGNED'
     ? classification.best.department
     : null;
@@ -319,27 +205,18 @@ const createComplaint = asyncHandler(async (req, res) => {
     throw new Error('department could not be resolved from AI classification or grievance mapping');
   }
 
-  const fallbackOfficer = mongoose.Types.ObjectId.isValid(assign_officer_id) || !hasLocation
+  const fallbackOfficer = mongoose.Types.ObjectId.isValid(assign_officer_id)
     ? null
     : await findOfficerForDepartment(location, department);
 
   const complaint = await Complaint.create({
     grievance_id,
-    title: complaintTitle,
-    description: complaintDescription,
+    title,
+    description,
     department,
     district: typeof district === 'string' && district.trim().length ? district.trim() : null,
     grievance_type,
-    source,
-    location_status: locationStatus,
-    location_text: typeof location_text === 'string' && location_text.trim().length ? location_text.trim() : null,
-    citizen_email: typeof citizen_email === 'string' && citizen_email.trim().length
-      ? citizen_email.trim().toLowerCase()
-      : (req.user?.email || null),
-    citizen_phone: typeof citizen_phone === 'string' && citizen_phone.trim().length
-      ? citizen_phone.trim()
-      : (req.user?.phone || null),
-    location: hasLocation ? location : undefined,
+    location,
     user_location: userLocation,
     image_location: imageLocation,
     image_url: imageUrl,
@@ -351,16 +228,12 @@ const createComplaint = asyncHandler(async (req, res) => {
       department_from_ai: classification?.best?.department || null,
       decision: classification?.best?.decision || 'FAILED',
       min_confidence_threshold: classification?.threshold ?? null,
-      model_results: classification?.models || [],
-      detected_location_text: null,
-      extracted_coordinates: hasLocation ? location.coordinates : undefined,
-      summary: complaintDescription.slice(0, 240)
-    },
-    ivr_metadata: {
-      followup_status: hasLocation ? 'NOT_REQUIRED' : 'PENDING'
+      model_results: classification?.models || []
     },
     status: 'PENDING',
-    created_by: mongoose.Types.ObjectId.isValid(created_by) ? created_by : undefined,
+    created_by: mongoose.Types.ObjectId.isValid(created_by)
+      ? created_by
+      : req.user?._id,
     assigned_to: mongoose.Types.ObjectId.isValid(assign_officer_id)
       ? assign_officer_id
       : fallbackOfficer?._id,
@@ -370,7 +243,7 @@ const createComplaint = asyncHandler(async (req, res) => {
     verification_status: 'PENDING',
     reopen_flag: 0,
     gps_match_flag: gpsMatchFlag,
-    photo_uploaded: req.file ? 1 : 0,
+    photo_uploaded: 1,
     ivr_response: 0
   });
 
@@ -432,14 +305,32 @@ const getNearbyComplaints = asyncHandler(async (req, res) => {
 const getMyComplaints = asyncHandler(async (req, res) => {
   if (!req.user?._id) {
     res.status(401);
-    throw new Error('Authentication required');
+    throw new Error('Authenticated user is required');
   }
 
-  const complaints = await Complaint.find({
+  const query = {
     $or: [
       { created_by: req.user._id },
-      { citizen_email: req.user.email },
-      { citizen_phone: req.user.phone }
+      req.user.email ? { citizen_email: req.user.email } : null,
+      req.user.phone ? { citizen_phone: req.user.phone } : null
+    ].filter(Boolean)
+  };
+
+  const complaints = await Complaint.find(query)
+    .sort({ created_at: -1 })
+    .lean();
+
+  res.json({
+    count: complaints.length,
+    complaints: complaints.map(serializeComplaint)
+  });
+});
+
+const getNeedsLocationComplaints = asyncHandler(async (_req, res) => {
+  const complaints = await Complaint.find({
+    $or: [
+      { location_status: 'NEEDS_IVR_FOLLOWUP' },
+      { source: { $in: ['IVR_CALL', 'APP_TEXT'] }, location_status: 'MISSING' }
     ]
   })
     .sort({ created_at: -1 })
@@ -456,137 +347,78 @@ const createIvrComplaint = asyncHandler(async (req, res) => {
     grievance_id,
     title,
     description,
-    transcript_text,
-    citizen_phone,
-    citizen_email,
     department: departmentInput,
     grievance_type,
-    call_sid,
-    recording_url,
-    location_text
+    citizen_phone,
+    location_text,
+    created_by,
+    lat,
+    lng
   } = req.body;
 
-  const resolvedCitizenPhone = typeof citizen_phone === 'string' && citizen_phone.trim().length
-    ? citizen_phone.trim()
-    : (req.user?.phone || null);
-
-  if (!resolvedCitizenPhone) {
+  if (!grievance_id || !title || !description || !grievance_type) {
     res.status(400);
-    throw new Error('citizen_phone is required for IVR complaint registration');
+    throw new Error('grievance_id, title, description, and grievance_type are required');
   }
 
-  const narrative = [description, transcript_text].filter(Boolean).join(' ').trim();
-  if (!narrative) {
-    res.status(400);
-    throw new Error('description or transcript_text is required for IVR complaint');
-  }
-
-  const resolvedGrievanceType = grievance_type || inferGrievanceTypeFromText(narrative);
-  const resolvedDepartment =
-    resolveDepartment(departmentInput, resolvedGrievanceType) ||
-    inferDepartmentFromText(narrative) ||
-    'General';
-
-  const location = buildPointFromBody(req.body);
-  const hasLocation = Boolean(location);
+  const department = resolveDepartment(departmentInput, grievance_type) || 'General';
+  const parsedLat = parseNumber(lat, 0);
+  const parsedLng = parseNumber(lng, 0);
+  const point = buildPointFromLatLng(parsedLat, parsedLng) || {
+    type: 'Point',
+    coordinates: [0, 0]
+  };
 
   const complaint = await Complaint.create({
-    grievance_id: grievance_id || `IVR-${Date.now()}`,
-    title: typeof title === 'string' && title.trim().length ? title.trim() : `IVR complaint - ${resolvedDepartment}`,
-    description: narrative,
-    grievance_type: resolvedGrievanceType,
-    source: 'IVR_CALL',
-    department: resolvedDepartment,
-    location: hasLocation ? location : undefined,
-    location_status: hasLocation ? 'AVAILABLE' : 'NEEDS_IVR_FOLLOWUP',
-    location_text: typeof location_text === 'string' && location_text.trim().length ? location_text.trim() : null,
-    citizen_phone: resolvedCitizenPhone,
-    citizen_email: typeof citizen_email === 'string' && citizen_email.trim().length ? citizen_email.trim().toLowerCase() : null,
-    ai_classification: {
-      department_from_ai: resolvedDepartment,
-      decision: 'AUTO_ASSIGNED',
-      summary: narrative.slice(0, 240),
-      detected_location_text: typeof location_text === 'string' ? location_text.trim() : null,
-      extracted_coordinates: hasLocation ? location.coordinates : undefined
-    },
-    ivr_metadata: {
-      call_sid: call_sid || null,
-      recording_url: recording_url || null,
-      transcript_text: transcript_text || null,
-      followup_status: hasLocation ? 'NOT_REQUIRED' : 'PENDING'
-    },
-    status: 'PENDING',
+    grievance_id,
+    title,
+    description,
+    department,
+    grievance_type,
+    source: 'APP_TEXT',
+    location: point,
+    user_location: point,
+    image_location: point,
+    location_status: location_text ? 'AVAILABLE' : 'NEEDS_IVR_FOLLOWUP',
+    location_text: location_text || null,
+    citizen_phone: citizen_phone || null,
+    created_by: mongoose.Types.ObjectId.isValid(created_by)
+      ? created_by
+      : req.user?._id,
     verification_status: 'PENDING',
     reopen_flag: 0,
-    gps_match_flag: 0,
     photo_uploaded: 0,
-    ivr_response: 0
+    gps_match_flag: 0,
+    ivr_response: 0,
+    ivr_metadata: {
+      followup_status: location_text ? 'NOT_REQUIRED' : 'PENDING'
+    }
   });
 
   res.status(201).json({
-    message: 'IVR complaint registered successfully',
+    message: 'Text complaint created successfully',
     complaint: serializeComplaint(complaint.toObject())
-  });
-});
-
-const getNeedsLocationComplaints = asyncHandler(async (req, res) => {
-  const query = {
-    location_status: { $in: ['MISSING', 'NEEDS_IVR_FOLLOWUP'] }
-  };
-
-  if (req.query.source) {
-    query.source = normalizeSource(req.query.source, req.query.source);
-  }
-
-  if (req.query.department) {
-    query.department = req.query.department;
-  }
-
-  const complaints = await Complaint.find(query)
-    .sort({ created_at: -1 })
-    .lean();
-
-  res.json({
-    count: complaints.length,
-    complaints: complaints.map(serializeComplaint)
   });
 });
 
 const triggerLocationFollowupIvr = asyncHandler(async (req, res) => {
   const complaint = await Complaint.findById(req.params.id);
-
   if (!complaint) {
     res.status(404);
     throw new Error('Complaint not found');
   }
 
-  const phone = req.body.citizen_phone || complaint.citizen_phone;
-  const ivrTriggerResult = await triggerLocationCollectionCall({
-    complaintId: String(complaint._id),
-    to: phone
-  });
-
-  if (phone && !complaint.citizen_phone) {
-    complaint.citizen_phone = phone;
-  }
-
   complaint.location_status = 'NEEDS_IVR_FOLLOWUP';
   complaint.ivr_metadata = {
-    ...complaint.ivr_metadata,
-    followup_status: 'TRIGGERED',
-    followup_call_sid:
-      req.body.followup_call_sid ||
-      ivrTriggerResult.call_sid ||
-      complaint.ivr_metadata?.followup_call_sid ||
-      null,
-    followup_triggered_at: new Date()
+    ...(complaint.ivr_metadata || {}),
+    followup_triggered_at: new Date(),
+    followup_status: 'TRIGGERED'
   };
 
   await complaint.save();
 
   res.json({
-    message: 'IVR follow-up for location marked as triggered',
-    ivr_trigger: ivrTriggerResult,
+    message: 'Location follow-up IVR triggered',
     complaint: serializeComplaint(complaint.toObject())
   });
 });
@@ -600,31 +432,25 @@ const ingestIvrLocationUpdate = asyncHandler(async (req, res) => {
 
   const lat = parseNumber(req.body.lat);
   const lng = parseNumber(req.body.lng);
-  const hasCoordinates = lat !== null && lng !== null;
 
-  if (hasCoordinates) {
-    complaint.location = {
-      type: 'Point',
-      coordinates: [lng, lat]
-    };
-    complaint.location_status = 'AVAILABLE';
+  if (lat === null || lng === null) {
+    res.status(400);
+    throw new Error('lat and lng are required');
   }
 
-  if (typeof req.body.location_text === 'string' && req.body.location_text.trim().length) {
-    complaint.location_text = req.body.location_text.trim();
-  }
-
+  complaint.location = buildPointFromLatLng(lat, lng);
+  complaint.user_location = complaint.user_location || complaint.location;
+  complaint.location_status = 'AVAILABLE';
+  complaint.location_text = req.body.location_text || complaint.location_text;
   complaint.ivr_metadata = {
-    ...complaint.ivr_metadata,
-    transcript_text: req.body.transcript_text || complaint.ivr_metadata?.transcript_text || null,
-    followup_call_sid: req.body.call_sid || complaint.ivr_metadata?.followup_call_sid || null,
-    followup_status: hasCoordinates ? 'COLLECTED' : (complaint.ivr_metadata?.followup_status || 'PENDING')
+    ...(complaint.ivr_metadata || {}),
+    followup_status: 'COLLECTED'
   };
 
   await complaint.save();
 
   res.json({
-    message: hasCoordinates ? 'IVR location captured successfully' : 'IVR location update recorded without coordinates',
+    message: 'IVR location ingested successfully',
     complaint: serializeComplaint(complaint.toObject())
   });
 });
@@ -636,35 +462,18 @@ const ingestIvrVerificationResponse = asyncHandler(async (req, res) => {
     throw new Error('Complaint not found');
   }
 
-  const responseValue = parseNumber(req.body.ivr_response);
-  if (![1, 2].includes(responseValue)) {
-    res.status(400);
-    throw new Error('ivr_response must be 1 (verified) or 2 (reopen)');
-  }
+  const ivrResponse = parseNumber(req.body.ivr_response, complaint.ivr_response);
 
-  complaint.ivr_response = responseValue;
+  complaint.ivr_response = ivrResponse;
   complaint.ivr_metadata = {
-    ...complaint.ivr_metadata,
-    call_sid: req.body.call_sid || complaint.ivr_metadata?.call_sid || null,
+    ...(complaint.ivr_metadata || {}),
     transcript_text: req.body.transcript_text || complaint.ivr_metadata?.transcript_text || null
   };
-
-  if (responseValue === 1) {
-    complaint.status = 'VERIFIED';
-    complaint.verification_status = 'VERIFIED';
-    complaint.reopen_flag = 0;
-    complaint.verified_at = new Date();
-  } else if (responseValue === 2) {
-    complaint.status = 'REOPENED';
-    complaint.verification_status = 'REOPENED';
-    complaint.reopen_flag = 1;
-    complaint.verified_at = undefined;
-  }
 
   await complaint.save();
 
   res.json({
-    message: 'IVR verification response recorded',
+    message: 'IVR response updated',
     complaint: serializeComplaint(complaint.toObject())
   });
 });
@@ -761,10 +570,8 @@ const getOfficerComplaints = asyncHandler(async (req, res) => {
     throw new Error('Officer department is required on user profile');
   }
 
-  const departmentVariants = getDepartmentVariants(req.user.department);
-
   const query = {
-    department: { $in: departmentVariants.length ? departmentVariants : [req.user.department] },
+    department: req.user.department,
     status: { $in: OFFICER_TRACKED_STATUSES }
   };
 
@@ -799,7 +606,7 @@ const startComplaintWork = asyncHandler(async (req, res) => {
     throw new Error('Complaint not found');
   }
 
-  if (!isDepartmentMatch(req.user.department, complaint.department)) {
+  if (complaint.department !== req.user.department) {
     res.status(403);
     throw new Error('You can only start complaints in your department');
   }
@@ -832,7 +639,7 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
     throw new Error('Complaint not found');
   }
 
-  if (!isDepartmentMatch(req.user.department, complaint.department)) {
+  if (complaint.department !== req.user.department) {
     res.status(403);
     throw new Error('You can only resolve complaints in your department');
   }
@@ -863,11 +670,6 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
   }
 
   const complaintPoint = complaint.location;
-  if (!complaintPoint || !Array.isArray(complaintPoint.coordinates) || complaintPoint.coordinates.length !== 2) {
-    res.status(400);
-    throw new Error('Complaint location is missing. Resolve location first before officer resolution.');
-  }
-
   const officerPoint = buildPointFromLatLng(officerLat, officerLng);
   const resolvedImageLocation = buildPointFromLatLng(exifGps.latitude, exifGps.longitude);
 
@@ -897,24 +699,6 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
   complaint.verification_status = 'PENDING';
   complaint.reopen_flag = 0;
   complaint.resolved_at = new Date();
-
-  const citizenPhone = req.body.citizen_phone || complaint.citizen_phone;
-  if (citizenPhone && !complaint.citizen_phone) {
-    complaint.citizen_phone = citizenPhone;
-  }
-
-  const ivrTriggerResult = await triggerComplaintVerificationCall({
-    complaintId: String(complaint._id),
-    to: complaint.citizen_phone
-  });
-
-  if (ivrTriggerResult.call_sid) {
-    complaint.ivr_metadata = {
-      ...complaint.ivr_metadata,
-      call_sid: ivrTriggerResult.call_sid
-    };
-  }
-
   await complaint.save();
 
   await User.findByIdAndUpdate(req.user._id, {
@@ -931,7 +715,6 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
       officer_to_complaint: Math.round(officerToComplaintMeters),
       image_to_complaint: Math.round(imageToComplaintMeters)
     },
-    ivr_trigger: ivrTriggerResult,
     complaint: serializeComplaint(complaint.toObject())
   });
 });
@@ -1008,11 +791,11 @@ module.exports = {
   getNearbyComplaints,
   getMyComplaints,
   getNeedsLocationComplaints,
+  getComplaintById,
+  voteOnComplaint,
   triggerLocationFollowupIvr,
   ingestIvrLocationUpdate,
   ingestIvrVerificationResponse,
-  getComplaintById,
-  voteOnComplaint,
   resolveComplaint,
   getOfficerComplaints,
   startComplaintWork,

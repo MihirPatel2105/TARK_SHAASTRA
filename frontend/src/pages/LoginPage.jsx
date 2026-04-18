@@ -2,7 +2,7 @@ import { Lock, ShieldCheck, Sparkles, UserRound } from "lucide-react";
 import { useContext, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AppContext } from "../App";
-import { authenticateDemoUser, getHomePath } from "../services/authStore";
+import { getHomePath } from "../services/authStore";
 import { loginUser } from "../services/backendApi";
 
 const initialForm = { email: "", password: "" };
@@ -37,17 +37,10 @@ function LoginPage() {
       login(session.user, session.token);
       navigate(getHomePath(session.user?.role));
     } catch (submitError) {
-      const demoUser = authenticateDemoUser(form.email, form.password);
-      if (demoUser) {
-        login(demoUser, "demo-token");
-        navigate(getHomePath(demoUser.role));
-        return;
-      }
-
       const isBackendUnavailable = String(submitError?.message || "").includes("Unable to reach backend");
 
       if (isBackendUnavailable) {
-        setError("Backend is offline. Start backend and MongoDB, or use valid demo credentials.");
+        setError("Backend is offline. Start backend and MongoDB, then try again.");
       } else {
         setError(submitError.message || "Unable to log in. Please verify your credentials.");
       }

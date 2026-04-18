@@ -1,32 +1,11 @@
 import { MapPin, RefreshCcw, SlidersHorizontal } from "lucide-react";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Circle, CircleMarker, MapContainer, TileLayer, useMapEvents } from "react-leaflet";
-import "leaflet/dist/leaflet.css";
+import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from "react-leaflet";
 import { AppContext } from "../App";
+import { departments, statusOptions } from "../services/mockData";
 
 const DEFAULT_CENTER = { lat: 28.6139, lng: 77.209 };
 const NEARBY_RADIUS_KM = 3;
-const LOCATION_ACCURACY_TARGET_METERS = 100;
-
-function MapClickHandler({ onMapClick }) {
-  useMapEvents({
-    click: onMapClick
-  });
-
-  return null;
-}
-
-function hasValidCoordinates(lat, lng) {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return false;
-  }
-
-  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-    return false;
-  }
-
-  return !(lat === 0 && lng === 0);
-}
 
 function haversineKm(a, b) {
   const toRadians = (value) => (value * Math.PI) / 180;
@@ -41,19 +20,47 @@ function haversineKm(a, b) {
   return 2 * earthRadius * Math.asin(Math.sqrt(h));
 }
 
+function FitToComplaints({ complaints, currentLocation }) {
+  const map = useMap();
+
+  if (!complaints.length && !currentLocation) {
+    map.setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 11);
+    return null;
+  }
+
+  const bounds = complaints.map((item) => [Number(item.location?.lat || 0), Number(item.location?.lng || 0)]);
+  if (currentLocation) {
+    bounds.push([currentLocation.lat, currentLocation.lng]);
+  }
+
+  map.fitBounds(bounds, { padding: [24, 24], maxZoom: 15 });
+  return null;
+}
+
+function ResizeMapOnLayoutChange({ resizeToken }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      map.invalidateSize();
+    }, 160);
+
+    return () => window.clearTimeout(timeout);
+  }, [map, resizeToken]);
+
+  return null;
+}
+
 function markerColor(status) {
-  if (status === "Pending") return "#1d4ed8";
-  if (status === "In Progress") return "#f59e0b";
   if (status === "Verified") return "#16a34a";
   if (status === "Resolved") return "#0284c7";
   if (status === "Reopened" || status === "Failed") return "#e11d48";
   return "#2563eb";
 }
 
-function MapPage({ workspaceLabel = "Citizen Workspace" }) {
-  const { complaints, departmentOptions, statusOptions, syncNearbyComplaints } = useContext(AppContext);
+function MapPage() {
+  const { complaints, syncNearbyComplaints } = useContext(AppContext);
   const mapShellRef = useRef(null);
-  const mapRef = useRef(null);
 
   const [department, setDepartment] = useState("All");
   const [status, setStatus] = useState("All");
@@ -63,7 +70,6 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [locationError, setLocationError] = useState("");
-  const [locationAccuracyMeters, setLocationAccuracyMeters] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentLocation, setCurrentLocation] = useState(null);
 
@@ -85,73 +91,18 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
         throw new Error("Geolocation is not supported on this browser.");
       }
 
-      const bestFix = await new Promise((resolve, reject) => {
-        let watchId = null;
-        let settled = false;
-        let bestPosition = null;
-
-        const finish = (value, isError = false) => {
-          if (settled) {
-            return;
-          }
-
-          settled = true;
-          if (watchId !== null) {
-            navigator.geolocation.clearWatch(watchId);
-          }
-
-          if (isError) {
-            reject(value);
-          } else {
-            resolve(value);
-          }
-        };
-
-        const timeoutId = window.setTimeout(() => {
-          if (bestPosition) {
-            finish(bestPosition);
-            return;
-          }
-
-          finish(new Error("Unable to fetch your current location."), true);
-        }, 12000);
-
-        watchId = navigator.geolocation.watchPosition(
-          (position) => {
-            const accuracy = Number(position.coords?.accuracy || Number.POSITIVE_INFINITY);
-            const bestAccuracy = Number(bestPosition?.coords?.accuracy || Number.POSITIVE_INFINITY);
-
-            if (!bestPosition || accuracy < bestAccuracy) {
-              bestPosition = position;
-            }
-
-            if (accuracy <= LOCATION_ACCURACY_TARGET_METERS) {
-              window.clearTimeout(timeoutId);
-              finish(position);
-            }
-          },
-          (error) => {
-            window.clearTimeout(timeoutId);
-            finish(error, true);
-          },
-          {
-            enableHighAccuracy: true,
-            timeout: 15000,
-            maximumAge: 0
-          }
-        );
+      const nextPosition = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
+        });
       });
 
-      const accuracy = Number(bestFix.coords?.accuracy || 0);
-      setLocationAccuracyMeters(Number.isFinite(accuracy) ? Math.round(accuracy) : null);
       setCurrentLocation({
-        lat: Number(bestFix.coords.latitude),
-        lng: Number(bestFix.coords.longitude)
+        lat: Number(nextPosition.coords.latitude),
+        lng: Number(nextPosition.coords.longitude)
       });
-
-      if (Number.isFinite(accuracy) && accuracy > LOCATION_ACCURACY_TARGET_METERS) {
-        setLocationError(`Location accuracy is ~${Math.round(accuracy)}m. Target is <= ${LOCATION_ACCURACY_TARGET_METERS}m.`);
-      }
     } catch (error) {
       setLocationError(error.message || "Unable to fetch your current location.");
     } finally {
@@ -210,85 +161,29 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
     [complaints, department, status]
   );
 
-  const mapMarkers = useMemo(
-    () =>
-      filtered
-        .map((item) => ({
-          ...item,
-          lat: Number(item.location?.lat),
-          lng: Number(item.location?.lng)
-        }))
-        .filter((item) => hasValidCoordinates(item.lat, item.lng)),
-    [filtered]
-  );
-
-  useEffect(() => {
-    if (!mapRef.current) return;
-
-    mapRef.current.invalidateSize();
-
-    const center = mapRef.current.getCenter();
-    if (hasValidCoordinates(center.lat, center.lng)) {
-      return;
-    }
-
-    if (mapMarkers.length) {
-      mapRef.current.setView([mapMarkers[0].lat, mapMarkers[0].lng], 11);
-      return;
-    }
-
-    const fallbackCenter = currentLocation || DEFAULT_CENTER;
-    mapRef.current.setView([fallbackCenter.lat, fallbackCenter.lng], 11);
-  }, [isFullscreen, mapMarkers, currentLocation]);
-
-  const selected = mapMarkers.find((item) => item.id === selectedId) || mapMarkers[0] || null;
-
-  const pendingTotal = useMemo(
-    () => filtered.filter((item) => item.status === "Pending").length,
-    [filtered]
-  );
-
-  const pendingPlotted = useMemo(
-    () => mapMarkers.filter((item) => item.status === "Pending").length,
-    [mapMarkers]
-  );
+  const selected = filtered.find((item) => item.id === selectedId) || filtered[0] || null;
 
   const nearbyRows = useMemo(() => {
     if (!currentLocation) return [];
 
     return filtered
       .map((item) => {
-        const lat = Number(item.location?.lat);
-        const lng = Number(item.location?.lng);
-
-        if (!hasValidCoordinates(lat, lng)) {
-          return null;
-        }
-
+        const lat = Number(item.location?.lat || 0);
+        const lng = Number(item.location?.lng || 0);
         return {
           ...item,
           distanceKm: haversineKm(currentLocation, { lat, lng })
         };
       })
-      .filter(Boolean)
       .sort((a, b) => a.distanceKm - b.distanceKm);
   }, [filtered, currentLocation]);
 
   const nearbyWithinRadius = nearbyRows.filter((item) => item.distanceKm <= NEARBY_RADIUS_KM);
-  const mapHeightClass = isFullscreen ? "h-screen" : "h-[70vh]";
-
-  const focusComplaintsOnMap = () => {
-    if (!mapRef.current || !mapMarkers.length) {
-      return;
-    }
-
-    mapRef.current.setView([mapMarkers[0].lat, mapMarkers[0].lng], 11);
-  };
 
   return (
     <section className="space-y-6">
       <div>
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">{workspaceLabel}</p>
+        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Citizen Workspace</p>
         <h2 className="mt-2 text-3xl font-bold text-slate-900">Complaints Map</h2>
         <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-600">Track your live location, view nearby complaints in real map tiles, and monitor distances with clear, professional filtering.</p>
       </div>
@@ -305,9 +200,6 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
         <button type="button" onClick={toggleFullscreen} className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
           {isFullscreen ? "Exit Full Mode" : "Open Full Mode"}
         </button>
-        <button type="button" onClick={focusComplaintsOnMap} className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
-          Show Complaint Markers
-        </button>
         {syncMessage ? <p className="rounded-full bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700">{syncMessage}</p> : null}
         {syncError ? <p className="rounded-full bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700">{syncError}</p> : null}
         {locationError ? <p className="rounded-full bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700">{locationError}</p> : null}
@@ -316,14 +208,6 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
             You are here: {currentLocation.lat.toFixed(5)}, {currentLocation.lng.toFixed(5)}
           </p>
         ) : null}
-        {locationAccuracyMeters !== null ? (
-          <p className="rounded-full bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700">
-            GPS accuracy: ~{locationAccuracyMeters}m (target {"<="} {LOCATION_ACCURACY_TARGET_METERS}m)
-          </p>
-        ) : null}
-        <p className="rounded-full bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700">
-          Pending markers: {pendingPlotted}/{pendingTotal}
-        </p>
       </div>
 
       <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-card sm:grid-cols-2">
@@ -331,7 +215,7 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
           <span className="mb-2 block font-semibold text-slate-700">Department</span>
           <select value={department} onChange={(event) => setDepartment(event.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900">
             <option>All</option>
-            {departmentOptions.map((dep) => (
+            {departments.map((dep) => (
               <option key={dep}>{dep}</option>
             ))}
           </select>
@@ -350,76 +234,51 @@ function MapPage({ workspaceLabel = "Citizen Workspace" }) {
 
       <div className="grid gap-5 xl:grid-cols-[1.5fr_0.9fr]">
         <div ref={mapShellRef} className="relative min-h-[420px] overflow-hidden rounded-[2rem] border border-slate-200 shadow-card">
-          <div className={mapHeightClass}>
-            <MapContainer
-              center={currentLocation ? [currentLocation.lat, currentLocation.lng] : [DEFAULT_CENTER.lat, DEFAULT_CENTER.lng]}
-              zoom={11}
-              className="h-full w-full"
-              zoomControl
-              whenReady={(event) => {
-                mapRef.current = event.target;
-                const firstMarker = mapMarkers[0];
-                const preferredCenter = firstMarker
-                  ? [firstMarker.lat, firstMarker.lng]
-                  : (currentLocation ? [currentLocation.lat, currentLocation.lng] : [DEFAULT_CENTER.lat, DEFAULT_CENTER.lng]);
-                event.target.setView(preferredCenter, 11);
-              }}
-            >
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
+          <MapContainer center={[DEFAULT_CENTER.lat, DEFAULT_CENTER.lng]} zoom={11} className={isFullscreen ? "h-screen w-full" : "h-[70vh] w-full"}>
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            <FitToComplaints complaints={filtered} currentLocation={currentLocation} />
+            <ResizeMapOnLayoutChange resizeToken={`${isFullscreen}-${filtered.length}-${Boolean(currentLocation)}`} />
 
-              <MapClickHandler onMapClick={() => setSelectedId(null)} />
+            {currentLocation ? (
+              <CircleMarker
+                center={[currentLocation.lat, currentLocation.lng]}
+                pathOptions={{ color: "#0f172a", fillColor: "#0ea5e9", fillOpacity: 0.95 }}
+                radius={9}
+              >
+                <Popup>
+                  <div className="text-sm">
+                    <p className="font-semibold">Your Current Location</p>
+                    <p>{currentLocation.lat.toFixed(5)}, {currentLocation.lng.toFixed(5)}</p>
+                  </div>
+                </Popup>
+              </CircleMarker>
+            ) : null}
 
-              {currentLocation ? (
-                <>
-                  <CircleMarker
-                    center={[currentLocation.lat, currentLocation.lng]}
-                    radius={6}
-                    pathOptions={{
-                      fillColor: "#ffffff",
-                      fillOpacity: 1,
-                      color: "#0ea5e9",
-                      weight: 2
-                    }}
-                  />
-                  <Circle
-                    center={[currentLocation.lat, currentLocation.lng]}
-                    radius={NEARBY_RADIUS_KM * 1000}
-                    pathOptions={{
-                      fillColor: "#0ea5e9",
-                      fillOpacity: 0.12,
-                      color: "#0ea5e9",
-                      opacity: 0.6,
-                      weight: 2
-                    }}
-                  />
-                </>
-              ) : null}
-
-              {mapMarkers.map((item) => (
-                <CircleMarker
-                  key={item.id}
-                  center={[item.lat, item.lng]}
-                  radius={item.status === "Pending" ? 10 : 8}
-                  pathOptions={{
-                    fillColor: markerColor(item.status),
-                    fillOpacity: 1,
-                    color: selectedId === item.id ? "#0f172a" : "#ffffff",
-                    weight: selectedId === item.id ? 3 : 2
-                  }}
-                  eventHandlers={{
-                    click: () => setSelectedId(item.id)
-                  }}
-                />
-              ))}
-            </MapContainer>
-          </div>
+            {filtered.map((item) => (
+              <CircleMarker
+                key={item.id}
+                center={[Number(item.location?.lat || 0), Number(item.location?.lng || 0)]}
+                pathOptions={{ color: markerColor(item.status), fillColor: markerColor(item.status), fillOpacity: 0.85 }}
+                radius={8}
+                eventHandlers={{ click: () => setSelectedId(item.id) }}
+              >
+                <Popup>
+                  <div className="text-sm">
+                    <p className="font-semibold">{item.title}</p>
+                    <p>{item.department}</p>
+                    <p>Status: {item.status}</p>
+                  </div>
+                </Popup>
+              </CircleMarker>
+            ))}
+          </MapContainer>
 
           <div className="pointer-events-none absolute left-4 top-4 rounded-2xl bg-white/90 px-4 py-3 shadow-sm backdrop-blur">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-900"><SlidersHorizontal size={16} /> Live filters active</div>
-            <p className="mt-1 text-xs text-slate-500">Complaint markers powered by Leaflet + OpenStreetMap tiles</p>
+            <p className="mt-1 text-xs text-slate-500">OpenStreetMap live tiles with complaint markers</p>
           </div>
           <div className="pointer-events-none absolute bottom-4 right-4 rounded-2xl bg-white/90 px-4 py-3 text-xs font-semibold text-slate-500 shadow-sm backdrop-blur">Click marker to inspect complaint details</div>
         </div>

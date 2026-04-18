@@ -1,14 +1,15 @@
 import { createContext, useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import RoleLayout from "./components/layout/RoleLayout";
-import { clearSession, getHomePath, loadStoredUser, normalizeRole, saveSession } from "./services/authStore";
+import { clearSession, getHomePath, loadAuthToken, loadStoredUser, normalizeRole, saveSession } from "./services/authStore";
 import { fetchAdminComplaints, fetchMyComplaints, fetchNearbyComplaints, fetchOfficerComplaints } from "./services/backendApi";
+import { departmentOptions, mockComplaints } from "./services/mockData";
 import LoginPage from "./pages/auth/LoginPage";
 import SignupPage from "./pages/auth/SignupPage";
 import CitizenDashboardPage from "./dashboards/Citizen/CitizenDashboard";
 import MapPage from "./pages/citizen/MapPage";
+import ProfilePage from "./pages/citizen/ProfilePage";
 import NewComplaintPage from "./pages/citizen/NewComplaintPage";
-import CitizenProfilePage from "./pages/citizen/ProfilePage";
 import TrackComplaintPage from "./pages/citizen/TrackComplaintPage";
 import ResolvedComplaintsPage from "./pages/citizen/ResolvedComplaintsPage";
 import ComplaintDetailsPage from "./pages/citizen/ComplaintDetailsPage";
@@ -24,6 +25,17 @@ import AdminProfilePage from "./pages/admin/ProfilePage";
 
 export const AppContext = createContext(null);
 
+const COMPLAINTS_KEY = "vgs_complaints";
+
+const loadLocal = (key, fallback) => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key));
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 const ProtectedRoute = ({ user, allowedRoles, children }) => {
   if (!user) {
     return <Navigate to="/login" replace />;
@@ -37,8 +49,84 @@ const ProtectedRoute = ({ user, allowedRoles, children }) => {
 };
 
 function App() {
-  const [user, setUser] = useState(() => loadStoredUser());
-  const [complaints, setComplaints] = useState([]);
+  const [user, setUser] = useState(() => {
+    const storedUser = loadStoredUser();
+    const token = loadAuthToken();
+    
+    // Only use stored user if we also have a valid JWT token
+    // Valid JWTs have format: xxx.yyy.zzz (3 parts separated by dots)
+    if (storedUser && token && typeof token === 'string' && token.includes('.')) {
+      const parts = token.split('.');
+      if (parts.length === 3 && parts.every(p => p.length > 0)) {
+        return storedUser;
+      }
+    }
+    
+    // Invalid or missing token - clear session and start fresh at login
+    clearSession();
+    return null;
+  });
+  const [complaints, setComplaints] = useState(() => {
+    const storedComplaints = loadLocal(COMPLAINTS_KEY, null);
+    if (Array.isArray(storedComplaints) && storedComplaints.length > 0) {
+      return storedComplaints;
+    }
+
+    // Seed static records once so dashboards and tables are not empty on first run.
+    const seededComplaints = mockComplaints.map((item) => ({
+      ...item,
+      location: item.location ? { ...item.location } : undefined,
+      verification: item.verification ? { ...item.verification } : undefined,
+      timeline: Array.isArray(item.timeline) ? item.timeline.map((entry) => ({ ...entry })) : []
+    }));
+    localStorage.setItem(COMPLAINTS_KEY, JSON.stringify(seededComplaints));
+    return seededComplaints;
+  });
+
+  const persistComplaints = useCallback((nextComplaintsOrUpdater) => {
+    setComplaints((previous) => {
+      const nextComplaints =
+        typeof nextComplaintsOrUpdater === "function" ? nextComplaintsOrUpdater(previous) : nextComplaintsOrUpdater;
+      localStorage.setItem(COMPLAINTS_KEY, JSON.stringify(nextComplaints));
+      return nextComplaints;
+    });
+  }, []);
+
+  const refreshComplaints = useCallback(async () => {
+    const role = normalizeRole(user?.role);
+
+    let nextComplaints = [];
+    if (role === "Admin") {
+      nextComplaints = await fetchAdminComplaints();
+    } else if (role === "Officer") {
+      nextComplaints = await fetchOfficerComplaints();
+    } else if (role === "Citizen") {
+      nextComplaints = await fetchMyComplaints();
+    }
+
+    if (Array.isArray(nextComplaints)) {
+      persistComplaints(nextComplaints);
+      return nextComplaints;
+    }
+
+    return [];
+  }, [persistComplaints, user?.role]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const token = loadAuthToken();
+    // Only refresh if we have both a user AND a valid token
+    if (!token || typeof token !== 'string' || !token.includes('.')) {
+      return;
+    }
+
+    refreshComplaints().catch(() => {
+      // Backend helpers already fall back to local data when unavailable.
+    });
+  }, [refreshComplaints, user]);
 
   const login = (nextUser, token) => {
     const userRecord = { ...nextUser, role: normalizeRole(nextUser.role) };
@@ -49,66 +137,14 @@ function App() {
   const logout = () => {
     clearSession();
     setUser(null);
-    setComplaints([]);
   };
 
-  const refreshComplaints = useCallback(async () => {
-    if (!user) {
-      setComplaints([]);
-      return [];
-    }
-
-    const role = normalizeRole(user.role);
-    let rows = [];
-
-    if (role === "Citizen") {
-      rows = await fetchMyComplaints();
-    } else if (role === "Officer") {
-      rows = await fetchOfficerComplaints();
-    } else if (role === "Admin") {
-      rows = await fetchAdminComplaints();
-    }
-
-    setComplaints(rows);
-    return rows;
-  }, [user]);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    const load = async () => {
-      try {
-        const rows = await refreshComplaints();
-        if (isCancelled) {
-          return;
-        }
-
-        setComplaints(rows);
-      } catch {
-        if (!isCancelled) {
-          setComplaints([]);
-        }
-      }
-    };
-
-    load();
-
-    const timer = window.setInterval(() => {
-      load();
-    }, 10000);
-
-    return () => {
-      isCancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [refreshComplaints]);
-
   const addComplaint = (complaint) => {
-    setComplaints((previous) => [complaint, ...previous.filter((item) => item.id !== complaint.id)]);
+    persistComplaints((previous) => [complaint, ...previous]);
   };
 
   const updateComplaint = (complaintId, patch) => {
-    setComplaints((previous) =>
+    persistComplaints((previous) =>
       previous.map((complaint) =>
         complaint.id === complaintId
           ? { ...complaint, ...patch, verification: { ...complaint.verification, ...(patch.verification || {}) } }
@@ -120,39 +156,24 @@ function App() {
   const syncNearbyComplaints = useCallback(async ({ lat, lng, radius = 2000, grievanceType } = {}) => {
     const apiComplaints = await fetchNearbyComplaints({ lat, lng, radius, grievanceType });
     if (apiComplaints.length) {
-      setComplaints((previous) => {
-        const merged = new Map(previous.map((item) => [item.id, item]));
-        apiComplaints.forEach((item) => merged.set(item.id, item));
-        return Array.from(merged.values());
-      });
+      persistComplaints(apiComplaints);
     }
     return apiComplaints;
-  }, []);
-
-  const departmentOptions = useMemo(
-    () => Array.from(new Set(complaints.map((item) => item.department).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    [complaints]
-  );
-
-  const statusOptions = useMemo(
-    () => Array.from(new Set(complaints.map((item) => item.status).filter(Boolean))),
-    [complaints]
-  );
+  }, [persistComplaints]);
 
   const value = useMemo(
     () => ({
       user,
       complaints,
-      departmentOptions,
-      statusOptions,
       login,
       logout,
       addComplaint,
       updateComplaint,
+      syncNearbyComplaints,
       refreshComplaints,
-      syncNearbyComplaints
+      departmentOptions
     }),
-    [user, complaints, departmentOptions, statusOptions, refreshComplaints, syncNearbyComplaints]
+    [user, complaints, syncNearbyComplaints, refreshComplaints]
   );
 
   return (
@@ -172,7 +193,7 @@ function App() {
         >
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<CitizenDashboardPage />} />
-          <Route path="profile" element={<CitizenProfilePage />} />
+          <Route path="profile" element={<ProfilePage />} />
           <Route path="map" element={<MapPage />} />
           <Route path="new-complaint" element={<NewComplaintPage />} />
           <Route path="track" element={<TrackComplaintPage />} />
