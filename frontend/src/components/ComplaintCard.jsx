@@ -1,6 +1,12 @@
 import { CalendarDays, Landmark } from "lucide-react";
 import StatusBadge from "./StatusBadge";
 
+const sourceLabel = {
+  APP_IMAGE: "App Image",
+  APP_TEXT: "App Text",
+  IVR_CALL: "IVR Call"
+};
+
 function ComplaintCard({ complaint, onOpen }) {
   return (
     <button
@@ -18,6 +24,10 @@ function ComplaintCard({ complaint, onOpen }) {
           <p className="mt-1 flex items-center gap-2 text-sm text-slate-500">
             <CalendarDays size={14} />
             {complaint.createdAt}
+          </p>
+          <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+            Source: {sourceLabel[complaint.source] || "App"}
+            {complaint.locationStatus && complaint.locationStatus !== "AVAILABLE" ? ` | Location: ${complaint.locationStatus}` : ""}
           </p>
           {complaint.location?.area ? <p className="mt-2 text-sm text-slate-500">{complaint.location.area}</p> : null}
         </div>
