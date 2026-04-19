@@ -9,10 +9,29 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const app = express();
 const VoiceResponse = twilio.twiml.VoiceResponse;
 
+const twilioClient =
+  process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
+    ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
+    : null;
+
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
+const MAX_VERIFICATION_ATTEMPTS = Number.parseInt(process.env.IVR_MAX_ATTEMPTS || "2", 10) || 2;
+
+const verificationResponses = [];
+const verificationSseClients = new Set();
+
+const AUDIO_1_URL =
+  process.env.IVR_MENU_AUDIO_URL ||
+  "https://res.cloudinary.com/dje2kddqv/video/upload/v1776514463/%E0%AA%A8%E0%AA%AE%E0%AA%B8%E0%AB%8D%E0%AA%A4%E0%AB%87_%E0%AA%A4%E0%AA%AE%E0%AA%BE%E0%AA%B0%E0%AB%80_%E0%AA%AB%E0%AA%B0%E0%AA%BF%E0%AA%AF%E0%AA%BE%E0%AA%A6.mp3_csxpaj.mp3";
+const AUDIO_2_URL =
+  process.env.IVR_OPTION_1_AUDIO_URL ||
+  "https://res.cloudinary.com/dje2kddqv/video/upload/v1776520210/_%E0%AA%A4%E0%AA%AE%E0%AA%BE%E0%AA%B0%E0%AB%80_%E0%AA%AB%E0%AA%B0%E0%AA%BF%E0%AA%AF%E0%AA%BE%E0%AA%A6_%E0%AA%AC%E0%AA%82%E0%AA%A7_%E0%AA%95%E0%AA%B0.mp3_xmqoix.mp3";
+const AUDIO_3_URL =
+  process.env.IVR_OPTION_2_AUDIO_URL ||
+  "https://res.cloudinary.com/dje2kddqv/video/upload/v1776520247/_%E0%AA%A4%E0%AA%AE%E0%AA%BE%E0%AA%B0%E0%AB%80_%E0%AA%AB%E0%AA%B0%E0%AA%BF%E0%AA%AF%E0%AA%BE%E0%AA%A6_%E0%AA%AB%E0%AA%B0%E0%AB%80%E0%AA%A5%E0%AB%80.mp3_xzte1d.mp3";
 
 const requiredEnvVars = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"];
 
@@ -140,11 +159,151 @@ function playLanguageMenu(twimlNode) {
 }
 
 function webhookUrl(routePath) {
-  const baseUrl = process.env.NGROK_BASE_URL;
+  const baseUrl = process.env.NGROK_BASE_URL || process.env.NGROK_URL;
   if (!baseUrl) {
     return routePath;
   }
   return `${baseUrl.replace(/\/$/, "")}${routePath}`;
+}
+
+function trimTrailingSlash(value) {
+  return String(value || "").replace(/\/+$/, "");
+}
+
+function decodeMaybeEncodedUri(value) {
+  if (!value) return "";
+  try {
+    return decodeURIComponent(value);
+  } catch (_error) {
+    return value;
+  }
+}
+
+function normalizePhoneNumber(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  if (raw.startsWith("+")) {
+    return raw;
+  }
+
+  const digits = raw.replace(/\D/g, "");
+
+  if (digits.length === 10) {
+    return `+91${digits}`;
+  }
+
+  if (digits.length === 12 && digits.startsWith("91")) {
+    return `+${digits}`;
+  }
+
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `+${digits}`;
+  }
+
+  return raw;
+}
+
+function addVerificationResponseLog(entry) {
+  const item = {
+    timestamp: Date.now(),
+    ...entry
+  };
+
+  verificationResponses.unshift(item);
+  if (verificationResponses.length > 100) {
+    verificationResponses.pop();
+  }
+
+  const payload = `data: ${JSON.stringify(item)}\n\n`;
+  for (const client of verificationSseClients) {
+    client.write(payload);
+  }
+}
+
+function buildVerificationUrl(pathname, complaintId, callbackUrl, attempt) {
+  return webhookUrl(
+    `${pathname}?complaintId=${encodeURIComponent(complaintId)}&callbackUrl=${encodeURIComponent(callbackUrl)}&attempt=${encodeURIComponent(
+      String(attempt)
+    )}`
+  );
+}
+
+async function isPublicIvrWebhookReachable() {
+  const baseUrl = trimTrailingSlash(process.env.NGROK_BASE_URL || process.env.NGROK_URL);
+  if (!baseUrl) {
+    return false;
+  }
+
+  try {
+    await axios.get(`${baseUrl}/status`, { timeout: 4000 });
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function buildFallbackVerificationTwiml() {
+  const twiml = new VoiceResponse();
+
+  if (AUDIO_1_URL) {
+    twiml.play(AUDIO_1_URL);
+  } else {
+    twiml.say(
+      { language: "gu-IN", voice: "alice" },
+      "નમસ્તે. તમારી ફરિયાદ માટે ચકાસણી કોલ છે. હાલ ટેકનિકલ કારણોસર કીપેડ ચકાસણી ઉપલબ્ધ નથી. અમારી ટીમ તમને ટૂંક સમયમાં સંપર્ક કરશે."
+    );
+  }
+
+  twiml.hangup();
+  return twiml.toString();
+}
+
+async function triggerVerificationCall({ complaintId, citizenPhone, callbackUrl }) {
+  const disableOutboundCall = String(process.env.DISABLE_OUTBOUND_IVR_CALL || "false").toLowerCase() === "true";
+
+  if (!twilioClient) {
+    throw new Error("Twilio client is not configured");
+  }
+
+  if (disableOutboundCall) {
+    return {
+      skipped: true,
+      callSid: null,
+      complaintId,
+      citizenPhone,
+      message: "Outbound IVR call is disabled by DISABLE_OUTBOUND_IVR_CALL"
+    };
+  }
+
+  const forcedDemoPhone = normalizePhoneNumber(process.env.IVR_DEMO_PHONE || process.env.DEMO_IVR_PHONE || "");
+  const callTarget = forcedDemoPhone || citizenPhone;
+
+  const webhookReachable = await isPublicIvrWebhookReachable();
+
+  const call = webhookReachable
+    ? await twilioClient.calls.create({
+        to: callTarget,
+        from: process.env.TWILIO_PHONE,
+        url: buildVerificationUrl("/ivr/verify", complaintId, callbackUrl, 1),
+        method: "POST"
+      })
+    : await twilioClient.calls.create({
+        to: callTarget,
+        from: process.env.TWILIO_PHONE,
+        twiml: buildFallbackVerificationTwiml()
+      });
+
+  return {
+    skipped: false,
+    callSid: call.sid,
+    complaintId,
+    citizenPhone: callTarget,
+    fallbackMode: !webhookReachable,
+    message: webhookReachable
+      ? "Verification IVR call queued"
+      : "Fallback verification call queued (public IVR webhook unavailable)"
+  };
 }
 
 function sayPrompt(twiml, language, promptKey) {
@@ -324,6 +483,189 @@ app.all("/ivr", (req, res) => {
 
   res.type("text/xml");
   res.send(twiml.toString());
+});
+
+app.post("/api/verification/call", async (req, res) => {
+  try {
+    const complaintId = String(req.body.complaintId || "").trim();
+    const citizenPhone = normalizePhoneNumber(req.body.citizenPhone || "");
+    const callbackUrl = String(req.body.callbackUrl || "").trim();
+
+    if (!complaintId || !citizenPhone || !callbackUrl) {
+      res.status(400).json({ message: "complaintId, citizenPhone, and callbackUrl are required" });
+      return;
+    }
+
+    const result = await triggerVerificationCall({
+      complaintId,
+      citizenPhone,
+      callbackUrl
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error("[ERROR] Failed to trigger verification call:", error.message);
+    res.status(500).json({ message: `Failed to trigger verification call: ${error.message}` });
+  }
+});
+
+app.get("/call-me", async (req, res) => {
+  try {
+    const phone = normalizePhoneNumber(req.query.phone || process.env.IVR_DEMO_PHONE || process.env.DEMO_IVR_PHONE || "");
+    const callbackUrl = String(req.query.callbackUrl || process.env.IVR_TEST_CALLBACK_URL || "http://localhost:5001/api/complaints/test/ivr-response");
+    const complaintId = String(req.query.complaintId || "demo-complaint").trim();
+
+    if (!phone) {
+      res.status(400).json({ message: "phone query param (or IVR_DEMO_PHONE env) is required" });
+      return;
+    }
+
+    const result = await triggerVerificationCall({
+      complaintId,
+      citizenPhone: phone,
+      callbackUrl
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error("[ERROR] Test verification call failed:", error.message);
+    res.status(500).json({ message: `Test verification call failed: ${error.message}` });
+  }
+});
+
+app.all("/ivr/verify", (req, res) => {
+  const twiml = new VoiceResponse();
+  const complaintId = String(req.body.complaintId || req.query.complaintId || "").trim();
+  const callbackUrl = String(req.body.callbackUrl || req.query.callbackUrl || "").trim();
+  const attempt = Number.parseInt(String(req.body.attempt || req.query.attempt || "1"), 10);
+  const safeAttempt = Number.isNaN(attempt) || attempt < 1 ? 1 : attempt;
+  const responseUrl = buildVerificationUrl("/ivr/verify/response", complaintId, callbackUrl, safeAttempt);
+
+  const gather = twiml.gather({
+    numDigits: 1,
+    action: responseUrl,
+    method: "POST",
+    timeout: Number(process.env.IVR_GATHER_TIMEOUT_SECONDS || 5)
+  });
+
+  if (AUDIO_1_URL) {
+    gather.play(AUDIO_1_URL);
+  } else {
+    gather.say(
+      { language: "gu-IN", voice: "alice" },
+      "નમસ્તે. તમારી ફરિયાદ માટે ચકાસણી કોલ છે. જો સમસ્યા ઉકેલાઈ હોય તો 1 દબાવો. ફરીથી ખોલવા માટે 2 દબાવો."
+    );
+  }
+
+  if (safeAttempt < MAX_VERIFICATION_ATTEMPTS) {
+    twiml.redirect({ method: "POST" }, buildVerificationUrl("/ivr/verify", complaintId, callbackUrl, safeAttempt + 1));
+  } else {
+    twiml.pause({ length: 5 });
+    twiml.hangup();
+  }
+
+  res.type("text/xml");
+  res.send(twiml.toString());
+});
+
+app.all("/ivr/verify/response", async (req, res) => {
+  const twiml = new VoiceResponse();
+  const digits = String(req.body.Digits || req.query.Digits || "").trim();
+  const complaintId = String(req.body.complaintId || req.query.complaintId || "").trim();
+  const callbackUrl = decodeMaybeEncodedUri(String(req.body.callbackUrl || req.query.callbackUrl || "").trim());
+  const attempt = Number.parseInt(String(req.body.attempt || req.query.attempt || "1"), 10);
+  const safeAttempt = Number.isNaN(attempt) || attempt < 1 ? 1 : attempt;
+
+  const from = String(req.body.From || req.query.From || "Unknown").trim();
+  let status = "";
+
+  if (digits === "1") {
+    status = "RESOLVED";
+  } else if (digits === "2") {
+    status = "REOPEN";
+  } else {
+    status = "NO_RESPONSE";
+  }
+
+  addVerificationResponseLog({
+    complaintId,
+    from,
+    digit: digits || "",
+    status,
+    attempt: safeAttempt
+  });
+
+  if (["1", "2"].includes(digits)) {
+    try {
+      await axios.post(
+        callbackUrl,
+        {
+          complaintId,
+          ivrResponse: digits,
+          callSid: req.body.CallSid || req.query.CallSid || null,
+          caller: from || null
+        },
+        {
+          timeout: 10000,
+          headers: {
+            ...(process.env.IVR_CALLBACK_SECRET ? { "x-ivr-secret": process.env.IVR_CALLBACK_SECRET } : {})
+          }
+        }
+      );
+    } catch (error) {
+      console.error("[ERROR] Unable to send IVR response callback:", error.message);
+    }
+
+    if (digits === "1") {
+      if (AUDIO_2_URL) {
+        twiml.play(AUDIO_2_URL);
+      } else {
+        twiml.say({ language: "gu-IN", voice: "alice" }, "આભાર. તમારી ફરિયાદ ઉકેલાઈ તરીકે નોંધાઈ છે.");
+      }
+    } else if (AUDIO_3_URL) {
+      twiml.play(AUDIO_3_URL);
+    } else {
+      twiml.say({ language: "gu-IN", voice: "alice" }, "આભાર. તમારી ફરિયાદ ફરી તપાસ માટે ખોલવામાં આવી છે.");
+    }
+
+    twiml.hangup();
+    res.type("text/xml");
+    res.send(twiml.toString());
+    return;
+  }
+
+  if (safeAttempt < MAX_VERIFICATION_ATTEMPTS) {
+    twiml.redirect({ method: "POST" }, buildVerificationUrl("/ivr/verify", complaintId, callbackUrl, safeAttempt + 1));
+  } else {
+    twiml.pause({ length: 5 });
+    twiml.hangup();
+  }
+
+  res.type("text/xml");
+  res.send(twiml.toString());
+});
+
+app.get("/api/responses", (req, res) => {
+  res.json(verificationResponses);
+});
+
+app.get("/api/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  res.write("data: connected\\n\\n");
+  verificationSseClients.add(res);
+
+  req.on("close", () => {
+    verificationSseClients.delete(res);
+  });
+});
+
+app.post("/api/test/ivr-callback", (req, res) => {
+  console.log("[INFO] Test IVR callback payload:", req.body || {});
+  res.status(200).json({ ok: true, message: "Test callback accepted" });
 });
 
 app.all("/menu", (req, res) => {

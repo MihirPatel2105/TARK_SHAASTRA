@@ -15,7 +15,8 @@ const linksByRole = {
     { to: "/officer/profile", label: "Profile", icon: UserCircle2 },
     { to: "/officer/assigned", label: "Assigned Complaints", icon: ClipboardList },
     { to: "/officer/proof", label: "Upload Proof", icon: UploadCloud },
-    { to: "/officer/verifications", label: "Pending Verifications", icon: ShieldCheck }
+    { to: "/officer/verifications", label: "Pending Verifications", icon: ShieldCheck },
+    { to: "/officer/resolved", label: "Resolved / Call Again", icon: FileCheck2 }
   ],
   Admin: [
     { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },

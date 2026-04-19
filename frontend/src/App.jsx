@@ -18,6 +18,7 @@ import OfficerDashboardPage from "./dashboards/Officer/OfficerDashboard";
 import OfficerAssignedComplaintsPage from "./pages/officer/OfficerAssignedComplaintsPage";
 import OfficerProofUploadPage from "./pages/officer/OfficerProofUploadPage";
 import OfficerPendingVerificationsPage from "./pages/officer/OfficerPendingVerificationsPage";
+import OfficerResolvedComplaintsPage from "./pages/officer/OfficerResolvedComplaintsPage";
 import OfficerProfilePage from "./pages/officer/ProfilePage";
 import AdminDashboardPage from "./dashboards/Admin/AdminDashboard";
 import AdminAnalyticsPage from "./pages/admin/AdminAnalyticsPage";
@@ -217,6 +218,7 @@ function App() {
           <Route path="assigned" element={<OfficerAssignedComplaintsPage />} />
           <Route path="proof" element={<OfficerProofUploadPage />} />
           <Route path="verifications" element={<OfficerPendingVerificationsPage />} />
+          <Route path="resolved" element={<OfficerResolvedComplaintsPage />} />
         </Route>
 
         <Route

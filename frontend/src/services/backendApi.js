@@ -551,6 +551,7 @@ export async function startOfficerComplaint(complaintId) {
 }
 
 export async function resolveOfficerComplaint(complaintId, payload) {
+  const markAsFake = String(payload?.fake_complaint || payload?.mark_as_fake || payload?.is_fake || "").toLowerCase() === "true" || String(payload?.fake_complaint || payload?.mark_as_fake || payload?.is_fake || "") === "1";
   const formData = new FormData();
   Object.entries(payload).forEach(([key, value]) => {
     if (value !== undefined && value !== null) {
@@ -570,10 +571,42 @@ export async function resolveOfficerComplaint(complaintId, payload) {
   } catch (error) {
     return fallbackIfServerError(error, updateLocalComplaint(complaintId, (complaint) => ({
       ...complaint,
-      status: "Resolved",
-      verificationStatus: "Verified",
+      status: markAsFake ? "Failed" : "Resolved",
+      verificationStatus: markAsFake ? "Failed" : "Pending",
       verification: { ...(complaint.verification || {}), photoUploaded: true, gpsMatch: true },
-      timeline: [...(complaint.timeline || []), { label: "Officer Evidence Submitted", date: new Date().toISOString().slice(0, 10) }]
+      scoring: markAsFake
+        ? {
+            ...(complaint.scoring || {}),
+            citizenPointsDelta: -15,
+            departmentPointsDelta: 0,
+            scoreReason: "OFFICER_MARKED_FAKE_COMPLAINT",
+            fakeComplaintFlag: true
+          }
+        : {
+            ...(complaint.scoring || {}),
+            citizenPointsDelta: 0,
+            departmentPointsDelta: 0,
+            scoreReason: "OFFICER_EVIDENCE_SUBMITTED",
+            fakeComplaintFlag: false
+          },
+      timeline: [...(complaint.timeline || []), { label: markAsFake ? "Officer Marked Complaint Fake" : "Officer Evidence Submitted", date: new Date().toISOString().slice(0, 10) }]
+    })));
+  }
+}
+
+export async function triggerOfficerVerificationCall(complaintId) {
+  const response = await apiFetch(`${API_BASE_URL}/officer/complaints/${complaintId}/trigger-ivr`, {
+    method: "POST",
+    headers: buildAuthHeaders()
+  });
+
+  try {
+    const data = await parseResponse(response);
+    return toUiComplaint(data.complaint);
+  } catch (error) {
+    return fallbackIfServerError(error, updateLocalComplaint(complaintId, (complaint) => ({
+      ...complaint,
+      timeline: [...(complaint.timeline || []), { label: "IVR re-triggered for pending verification", date: new Date().toISOString().slice(0, 10) }]
     })));
   }
 }

@@ -145,7 +145,13 @@ function MapPage() {
         await runSync(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng);
       }
     } catch (error) {
-      setSyncError(error.message || "Failed to load complaints from backend.");
+      const rawMessage = String(error?.message || "");
+      const isGatewayLikeError =
+        rawMessage.toLowerCase().includes("bad gateway") ||
+        rawMessage.toLowerCase().includes("unexpected token") ||
+        rawMessage.toLowerCase().includes("not valid json");
+
+      setSyncError(isGatewayLikeError ? "Backend temporarily unavailable. Please try again in a moment." : rawMessage || "Failed to load complaints from backend.");
     } finally {
       setIsSyncing(false);
     }
@@ -154,6 +160,11 @@ function MapPage() {
   const filtered = useMemo(
     () =>
       complaints.filter((item) => {
+        const hiddenFromMap = item.status === "Verified" || item.status === "Resolved";
+        if (hiddenFromMap) {
+          return false;
+        }
+
         const departmentPass = department === "All" || item.department === department;
         const statusPass = status === "All" || item.status === status;
         return departmentPass && statusPass;

@@ -33,7 +33,20 @@ function ResolvedComplaintsPage() {
               <div className="mt-4 grid gap-3 text-sm text-slate-700 sm:grid-cols-2">
                 <p><span className="font-semibold text-slate-900">Date:</span> {complaint.resolvedAt || complaint.createdAt}</p>
                 <p><span className="font-semibold text-slate-900">Final result:</span> Verified after citizen confirmation</p>
+                <p><span className="font-semibold text-slate-900">Citizen score:</span> {complaint.scoring?.citizenPointsDelta ?? 0}</p>
+                <p><span className="font-semibold text-slate-900">Department score:</span> {complaint.scoring?.departmentPointsDelta ?? 0}</p>
               </div>
+
+              {complaint.resolvedImageUrl ? (
+                <div className="mt-4">
+                  <p className="mb-2 text-sm font-semibold text-slate-900">Officer uploaded proof</p>
+                  <img
+                    src={complaint.resolvedImageUrl}
+                    alt={`Resolution proof for ${complaint.title}`}
+                    className="max-h-80 w-full rounded-2xl border border-slate-200 object-cover"
+                  />
+                </div>
+              ) : null}
 
               <div className="mt-5">
                 <VerificationIndicator verification={complaint.verification} />

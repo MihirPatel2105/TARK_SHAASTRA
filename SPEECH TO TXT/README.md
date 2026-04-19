@@ -53,8 +53,21 @@ Use the HTTPS forwarding URL in Twilio Phone Number voice webhook:
 - `POST /menu` - Keypress handling
 - `POST /record` - Voice recording step
 - `POST /recording` - Download recording, STT, Gemini summary
+- `POST /api/verification/call` - Trigger outbound verification call (used by backend after officer resolution)
+- `POST /ivr/verify` - Verification IVR prompt for citizen
+- `POST /ivr/verify/response` - Captures citizen keypress (`1` resolved, `2` reopen) and calls backend callback
 - `GET /complaints` - Optional in-memory complaints list
 - `GET /health` - Health check
+
+## Officer Resolve -> IVR Verify flow
+
+1. Officer uploads resolution proof in backend (`/api/officer/complaints/:id/resolve`).
+2. Backend calls `POST /api/verification/call` on this service.
+3. Twilio places call to citizen number and asks for `1` (resolved) or `2` (reopen).
+4. This service posts keypress result to backend callback URL.
+5. Backend finalizes complaint state:
+	- `1` -> `VERIFIED`
+	- `2` -> `REOPENED`
 
 ## Notes
 

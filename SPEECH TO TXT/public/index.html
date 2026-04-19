@@ -346,7 +346,29 @@
       async function loadInitial() {
         try {
           const response = await fetch("/api/complaints");
-          const data = await response.json();
+          const raw = await response.text();
+          let data = {};
+
+          if (raw) {
+            try {
+              data = JSON.parse(raw);
+            } catch (_parseError) {
+              data = { message: raw };
+            }
+          }
+
+          if (!response.ok) {
+            const message = String(data.message || "");
+            const lower = message.toLowerCase();
+            const isGatewayLike =
+              lower.includes("bad gateway") ||
+              lower.includes("unexpected token") ||
+              lower.includes("not valid json") ||
+              response.status >= 500;
+
+            throw new Error(isGatewayLike ? "સર્વર તાત્કાલિક ઉપલબ્ધ નથી. કૃપા કરીને થોડા સમય પછી ફરી પ્રયાસ કરો." : (message || `HTTP ${response.status}`));
+          }
+
           complaints = (data.complaints || []).slice().reverse();
           render();
         } catch (error) {

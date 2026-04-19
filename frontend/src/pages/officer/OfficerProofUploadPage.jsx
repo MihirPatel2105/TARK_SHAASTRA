@@ -7,7 +7,7 @@ function OfficerProofUploadPage() {
   const { complaints, refreshComplaints } = useContext(AppContext);
   const officerCases = useMemo(
     () =>
-      complaints.filter((item) => item.status === "Pending" || item.status === "In Progress" || item.status === "Resolved"),
+      complaints.filter((item) => item.status === "Pending" || item.status === "In Progress" || item.status === "Reopened"),
     [complaints]
   );
   const [complaintId, setComplaintId] = useState("");
@@ -33,7 +33,7 @@ function OfficerProofUploadPage() {
     [officerCases, complaintId]
   );
 
-  const submit = async () => {
+  const submit = async (markAsFake = false) => {
     if (!complaintId || !photo || !gps) {
       setMessage("Select a complaint, attach a photo, and capture GPS before submitting.");
       return;
@@ -54,11 +54,14 @@ function OfficerProofUploadPage() {
       await resolveOfficerComplaint(complaintId, {
         image: photo,
         officer_lat: officerLat,
-        officer_lng: officerLng
+        officer_lng: officerLng,
+        fake_complaint: markAsFake ? 1 : 0,
+        citizen_phone: selectedComplaint?.citizenPhone || undefined
       });
       await refreshComplaints();
-      setMessage("Evidence submitted and complaint resolution updated from backend.");
+      setMessage(markAsFake ? "Complaint marked as fake. Citizen points reduced." : "Evidence submitted. Complaint moved to Pending Verification and IVR call triggered immediately to demo number.");
       setPhoto(null);
+      setGps("");
     } catch (error) {
       setMessage(error.message || "Unable to submit evidence.");
     } finally {
@@ -131,12 +134,17 @@ function OfficerProofUploadPage() {
           </button>
         </div>
 
-        <button type="button" onClick={submit} disabled={isSubmitting || !officerCases.length} className="mt-4 rounded-2xl bg-emerald-700 px-5 py-3 font-semibold text-white shadow-lg shadow-emerald-700/20 disabled:cursor-not-allowed disabled:opacity-60">
-          {isSubmitting ? "Submitting..." : "Submit Evidence"}
-        </button>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button type="button" onClick={() => submit(false)} disabled={isSubmitting || !officerCases.length} className="rounded-2xl bg-emerald-700 px-5 py-3 font-semibold text-white shadow-lg shadow-emerald-700/20 disabled:cursor-not-allowed disabled:opacity-60">
+            {isSubmitting ? "Submitting..." : "Submit Evidence"}
+          </button>
+          <button type="button" onClick={() => submit(true)} disabled={isSubmitting || !officerCases.length} className="rounded-2xl bg-rose-700 px-5 py-3 font-semibold text-white shadow-lg shadow-rose-700/20 disabled:cursor-not-allowed disabled:opacity-60">
+            {isSubmitting ? "Submitting..." : "Mark Fake Complaint"}
+          </button>
+        </div>
 
         {message ? <p className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">{message}</p> : null}
-        <p className="mt-4 text-sm text-slate-500">Submitting evidence sets photo and GPS verification flags for the complaint.</p>
+        <p className="mt-4 text-sm text-slate-500">Photo proof is mandatory for both actions. Submit Evidence sends the case to Pending Verification; Mark Fake Complaint deducts citizen points and finalizes it as failed.</p>
       </div>
     </section>
   );

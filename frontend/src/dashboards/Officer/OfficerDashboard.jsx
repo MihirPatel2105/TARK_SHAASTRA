@@ -1,4 +1,4 @@
-import { ClipboardList, MapPin, RefreshCcw, ShieldCheck, UploadCloud } from "lucide-react";
+import { ClipboardList, FileCheck2, MapPin, RefreshCcw, ShieldCheck, UploadCloud } from "lucide-react";
 import { useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CircleMarker, MapContainer, Popup, TileLayer } from "react-leaflet";
@@ -57,7 +57,8 @@ function OfficerDashboardPage() {
   const cards = [
     { title: "Assigned Complaints", description: "Review complaints assigned to your desk.", icon: ClipboardList, colorClass: "bg-blue-600", path: "/officer/assigned" },
     { title: "Upload Proof", description: "Submit evidence and GPS confirmation.", icon: UploadCloud, colorClass: "bg-emerald-600", path: "/officer/proof" },
-    { title: "Pending Verifications", description: "See items waiting for citizen confirmation.", icon: ShieldCheck, colorClass: "bg-amber-600", path: "/officer/verifications" }
+    { title: "Pending Verifications", description: "See items waiting for citizen confirmation.", icon: ShieldCheck, colorClass: "bg-amber-600", path: "/officer/verifications" },
+    { title: "Resolved Complaints", description: "Review stored resolved cases and trigger follow-up calls.", icon: FileCheck2, colorClass: "bg-sky-700", path: "/officer/resolved" }
   ];
 
   return (

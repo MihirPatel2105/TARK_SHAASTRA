@@ -4,6 +4,7 @@ const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const { uploadBufferToCloudinary } = require('../services/cloudinaryService');
 const { classifyImageByAllModels } = require('../services/roboflowService');
+const { triggerResolutionVerificationCall } = require('../services/speechIvrService');
 const { haversineDistanceMeters } = require('../utils/geo');
 const { extractImageGps } = require('../utils/imageGps');
 
@@ -115,6 +116,84 @@ function serializeComplaint(complaint) {
 
 function getComplaintAssignee(complaint) {
   return complaint.assigned_to || complaint.assigned_officer;
+}
+
+function parseIvrResolutionChoice(rawValue) {
+  const value = String(rawValue || '').trim().toLowerCase();
+
+  if (['1', 'yes', 'resolved', 'resolve', 'verified'].includes(value)) {
+    return 'RESOLVED';
+  }
+
+  if (['2', 'no', 'reopen', 'reopened', 'failed'].includes(value)) {
+    return 'REOPENED';
+  }
+
+  return null;
+}
+
+function applyIvrOutcomeToComplaint(complaint, outcome) {
+  if (outcome === 'RESOLVED') {
+    complaint.status = 'VERIFIED';
+    complaint.verification_status = 'VERIFIED';
+    complaint.reopen_flag = 0;
+    complaint.verified_at = new Date();
+    complaint.scoring = {
+      ...complaint.scoring,
+      citizen_points_delta: 5,
+      department_points_delta: 10,
+      score_reason: 'Citizen confirmed resolution through IVR',
+      fake_complaint_flag: 0
+    };
+    return;
+  }
+
+  complaint.status = 'REOPENED';
+  complaint.verification_status = 'REOPENED';
+  complaint.reopen_flag = 1;
+  complaint.verified_at = undefined;
+  complaint.scoring = {
+    ...complaint.scoring,
+    citizen_points_delta: 0,
+    department_points_delta: -5,
+    score_reason: 'Citizen requested complaint reopening through IVR',
+    fake_complaint_flag: 0
+  };
+}
+
+async function applyUserPointUpdatesForIvrOutcome(complaint, outcome) {
+  const updates = [];
+
+  if (outcome === 'RESOLVED') {
+    if (complaint.created_by) {
+      updates.push(User.findByIdAndUpdate(complaint.created_by, { $inc: { points: 5 } }));
+    }
+    const assigneeId = getComplaintAssignee(complaint);
+    if (assigneeId) {
+      updates.push(User.findByIdAndUpdate(assigneeId, { $inc: { points: 10 } }));
+    }
+  } else {
+    const assigneeId = getComplaintAssignee(complaint);
+    if (assigneeId) {
+      updates.push(User.findByIdAndUpdate(assigneeId, { $inc: { points: -5 } }));
+    }
+  }
+
+  if (updates.length > 0) {
+    await Promise.all(updates);
+  }
+}
+
+async function applyUserPointUpdatesForFakeComplaint(complaint) {
+  const updates = [];
+
+  if (complaint.created_by) {
+    updates.push(User.findByIdAndUpdate(complaint.created_by, { $inc: { points: -15 } }));
+  }
+
+  if (updates.length > 0) {
+    await Promise.all(updates);
+  }
 }
 
 const createComplaint = asyncHandler(async (req, res) => {
@@ -572,11 +651,6 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
     throw new Error('Complaint not found');
   }
 
-  if (complaint.department !== req.user.department) {
-    res.status(403);
-    throw new Error('You can only resolve complaints in your department');
-  }
-
   const assigneeId = getComplaintAssignee(complaint);
   if (assigneeId && assigneeId.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
     res.status(403);
@@ -606,9 +680,23 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
     folder: 'complaints/resolutions'
   });
 
-  const gpsMatchFlag = 1;
+  const markAsFake = String(req.body.fake_complaint || req.body.mark_as_fake || req.body.is_fake || '').toLowerCase() === 'true' || String(req.body.fake_complaint || req.body.mark_as_fake || req.body.is_fake || '') === '1';
 
-  complaint.status = 'RESOLVED';
+  const gpsMatchFlag = 1;
+  const demoIvrPhone = String(process.env.DEMO_IVR_PHONE || '+919662876737').trim();
+  let citizenPhone = String(complaint.citizen_phone || '').trim();
+
+  if (!citizenPhone && !markAsFake && complaint.created_by) {
+    const citizenUser = await User.findById(complaint.created_by).select('phone').lean();
+    citizenPhone = String(citizenUser?.phone || '').trim();
+  }
+
+  if (!citizenPhone && !markAsFake && complaint.citizen_email) {
+    const citizenUserByEmail = await User.findOne({ email: complaint.citizen_email }).select('phone').lean();
+    citizenPhone = String(citizenUserByEmail?.phone || '').trim();
+  }
+
+  complaint.status = markAsFake ? 'FAILED' : 'RESOLVED';
   complaint.assigned_to = req.user._id;
   complaint.assigned_officer = req.user._id;
   complaint.resolved_image = uploadResult.secure_url;
@@ -617,9 +705,28 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
   complaint.resolved_image_location = resolvedImageLocation;
   complaint.photo_uploaded = 1;
   complaint.gps_match_flag = gpsMatchFlag;
-  complaint.verification_status = 'PENDING';
+  complaint.citizen_phone = markAsFake ? complaint.citizen_phone || null : (complaint.citizen_phone || citizenPhone);
+  complaint.verification_status = markAsFake ? 'FAILED' : 'PENDING';
   complaint.reopen_flag = 0;
   complaint.resolved_at = new Date();
+  complaint.verified_at = markAsFake ? undefined : complaint.verified_at;
+
+  if (!complaint.scoring) {
+    complaint.scoring = {
+      citizen_points_delta: 0,
+      department_points_delta: 0,
+      score_reason: null,
+      fake_complaint_flag: 0
+    };
+  }
+
+  if (markAsFake) {
+    complaint.scoring.citizen_points_delta = -15;
+    complaint.scoring.department_points_delta = 0;
+    complaint.scoring.score_reason = 'OFFICER_MARKED_FAKE_COMPLAINT';
+    complaint.scoring.fake_complaint_flag = 1;
+  }
+
   await complaint.save();
 
   await User.findByIdAndUpdate(req.user._id, {
@@ -629,13 +736,166 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
     }
   });
 
+  let ivrTrigger = {
+    attempted: false,
+    triggered: false,
+    callSid: null,
+    reason: null,
+    error: null
+  };
+
+  if (markAsFake) {
+    ivrTrigger.reason = 'Complaint marked as fake, IVR call skipped';
+    await applyUserPointUpdatesForFakeComplaint(complaint);
+  } else if (!citizenPhone) {
+    ivrTrigger.reason = 'Demo IVR phone is unavailable, so IVR call was skipped';
+  } else {
+    ivrTrigger.attempted = true;
+    try {
+      const ivrResponse = await triggerResolutionVerificationCall({
+        complaintId: complaint._id.toString(),
+        citizenPhone
+      });
+
+      ivrTrigger.triggered = true;
+      ivrTrigger.callSid = ivrResponse.callSid || null;
+      ivrTrigger.reason = ivrResponse.message || 'IVR call triggered to demo number';
+
+      if (ivrResponse?.fallbackMode) {
+        applyIvrOutcomeToComplaint(complaint, 'RESOLVED');
+        complaint.scoring = {
+          ...complaint.scoring,
+          score_reason: 'AUTO_VERIFIED_FALLBACK_CALL'
+        };
+        await complaint.save();
+        await applyUserPointUpdatesForIvrOutcome(complaint, 'RESOLVED');
+        ivrTrigger.reason = `${ivrTrigger.reason} Complaint auto-verified in fallback mode.`;
+      }
+    } catch (error) {
+      ivrTrigger.error = error.response?.data?.message || error.message;
+      ivrTrigger.reason = 'Failed to trigger IVR call';
+    }
+  }
+
   res.json({
-    message: 'Complaint resolved by officer',
+    message: markAsFake ? 'Complaint marked as fake by officer' : 'Complaint resolved by officer',
     gps_match_flag: gpsMatchFlag,
     distance_meters: {
       officer_to_complaint: Math.round(officerToComplaintMeters),
       image_to_complaint: Math.round(imageToComplaintMeters)
     },
+    ivr_target_phone: citizenPhone || null,
+    ivr_trigger: ivrTrigger,
+    complaint: serializeComplaint(complaint.toObject())
+  });
+});
+
+const triggerOfficerVerificationCall = asyncHandler(async (req, res) => {
+  if (!req.user.department) {
+    res.status(400);
+    throw new Error('Officer department is required on user profile');
+  }
+
+  const complaint = await Complaint.findById(req.params.id);
+  if (!complaint) {
+    res.status(404);
+    throw new Error('Complaint not found');
+  }
+
+  const assigneeId = getComplaintAssignee(complaint);
+  if (assigneeId && assigneeId.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+    res.status(403);
+    throw new Error('Complaint is assigned to another officer');
+  }
+
+  if (complaint.verification_status !== 'PENDING') {
+    res.status(409);
+    throw new Error('IVR can only be triggered for complaints pending verification');
+  }
+
+  const demoIvrPhone = String(process.env.DEMO_IVR_PHONE || '+919662876737').trim();
+  const citizenPhone = String(complaint.citizen_phone || demoIvrPhone).trim();
+
+  let ivrTrigger = {
+    attempted: false,
+    triggered: false,
+    callSid: null,
+    reason: null,
+    error: null
+  };
+
+  if (!citizenPhone) {
+    ivrTrigger.reason = 'Demo IVR phone is unavailable, so IVR call was skipped';
+  } else {
+    ivrTrigger.attempted = true;
+    try {
+      const ivrResponse = await triggerResolutionVerificationCall({
+        complaintId: complaint._id.toString(),
+        citizenPhone
+      });
+
+      ivrTrigger.triggered = true;
+      ivrTrigger.callSid = ivrResponse.callSid || null;
+      ivrTrigger.reason = ivrResponse.message || 'IVR call triggered to demo number';
+
+      if (ivrResponse?.fallbackMode) {
+        applyIvrOutcomeToComplaint(complaint, 'RESOLVED');
+        complaint.scoring = {
+          ...complaint.scoring,
+          score_reason: 'AUTO_VERIFIED_FALLBACK_CALL'
+        };
+        await complaint.save();
+        await applyUserPointUpdatesForIvrOutcome(complaint, 'RESOLVED');
+        ivrTrigger.reason = `${ivrTrigger.reason} Complaint auto-verified in fallback mode.`;
+      }
+    } catch (error) {
+      ivrTrigger.error = error.response?.data?.message || error.message;
+      ivrTrigger.reason = 'Failed to trigger IVR call';
+    }
+  }
+
+  res.json({
+    message: 'Verification IVR re-triggered',
+    ivr_target_phone: citizenPhone || null,
+    ivr_trigger: ivrTrigger,
+    complaint: serializeComplaint(complaint.toObject())
+  });
+});
+
+const ingestIvrVerificationResponse = asyncHandler(async (req, res) => {
+  const configuredSecret = process.env.IVR_CALLBACK_SECRET;
+  if (configuredSecret) {
+    const receivedSecret = req.headers['x-ivr-secret'];
+    if (receivedSecret !== configuredSecret) {
+      res.status(401);
+      throw new Error('Invalid IVR callback secret');
+    }
+  }
+
+  const complaint = await Complaint.findById(req.params.id);
+  if (!complaint) {
+    res.status(404);
+    throw new Error('Complaint not found');
+  }
+
+  const outcome = parseIvrResolutionChoice(req.body.ivrResponse || req.body.response || req.body.Digits || req.query.Digits);
+  if (!outcome) {
+    res.status(400);
+    throw new Error('IVR response must be 1/2 or equivalent resolved/reopened values');
+  }
+
+  if (complaint.verification_status !== 'PENDING') {
+    res.status(409);
+    throw new Error('Complaint verification has already been finalized');
+  }
+
+  applyIvrOutcomeToComplaint(complaint, outcome);
+  await complaint.save();
+  await applyUserPointUpdatesForIvrOutcome(complaint, outcome);
+
+  res.json({
+    message: 'IVR response ingested successfully',
+    outcome,
     complaint: serializeComplaint(complaint.toObject())
   });
 });
@@ -831,9 +1091,11 @@ module.exports = {
   voteOnComplaint,
   ingestLocationUpdate,
   resolveComplaint,
+  ingestIvrVerificationResponse,
   getOfficerComplaints,
   startComplaintWork,
   resolveOfficerComplaint,
+  triggerOfficerVerificationCall,
   analytics,
   predictDepartment,
   predictComplaintDetails,

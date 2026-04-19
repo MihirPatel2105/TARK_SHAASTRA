@@ -142,6 +142,17 @@ Send officer user ID in header: `x-user-id: <OFFICER_ID>`
 - `POST /api/officer/complaints/:id/start`
 - `POST /api/officer/complaints/:id/resolve`
 
+Officer resolve now triggers automatic citizen IVR verification (when `citizen_phone` exists).
+
+- backend -> `SPEECH TO TXT` service: `POST /api/verification/call`
+- speech service -> backend callback: `POST /api/complaints/:id/ivr-response`
+
+Additional env vars for this integration:
+
+- `SPEECH_TO_TEXT_IVR_URL` (default: `http://localhost:3000`)
+- `BACKEND_PUBLIC_URL` (public URL reachable by speech service for callback)
+- `IVR_CALLBACK_SECRET` (optional shared secret, sent as `x-ivr-secret`)
+
 Officer resolve uses `multipart/form-data` with:
 
 - `image` (required proof image)

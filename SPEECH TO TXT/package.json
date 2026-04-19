@@ -4,10 +4,13 @@
   "description": "Twilio-only IVR complaint registration backend",
   "main": "server.js",
   "scripts": {
-    "free:3000": "node scripts/kill-port.js 3000",
-    "dev:clean": "npm run free:3000 && nodemon server.js",
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+    "free:3001": "node scripts/kill-port.js 3001",
+    "dev:clean": "npm run free:3001 && nodemon server.js",
+    "start": "npm run free:3001 && node server.js",
+    "dev": "npm run dev:clean",
+    "test:verify-call": "node scripts/test-verification-call.js",
+    "trigger:ivr": "node scripts/trigger-ivr-call.js",
+    "tunnel": "npx localtunnel --port 3001 --subdomain hp-tark-ivr-3001"
   },
   "keywords": [
     "twilio",
