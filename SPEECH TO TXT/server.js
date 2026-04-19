@@ -31,6 +31,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const MAX_VERIFICATION_ATTEMPTS = Number.parseInt(process.env.IVR_MAX_ATTEMPTS || "2", 10) || 2;
 const MAX_RECORDING_ATTEMPTS = Number.parseInt(process.env.IVR_MAX_RECORDING_ATTEMPTS || "3", 10) || 3;
+const POST_AUDIO_HANGUP_DELAY_SECONDS = Number.parseInt(process.env.IVR_POST_AUDIO_HANGUP_DELAY_SECONDS || "10", 10) || 10;
 
 const verificationResponses = [];
 const verificationSseClients = new Set();
@@ -267,6 +268,7 @@ function buildFallbackVerificationTwiml() {
     );
   }
 
+  twiml.pause({ length: POST_AUDIO_HANGUP_DELAY_SECONDS });
   twiml.hangup();
   return twiml.toString();
 }
@@ -572,7 +574,7 @@ app.all("/ivr/verify", (req, res) => {
   if (safeAttempt < MAX_VERIFICATION_ATTEMPTS) {
     twiml.redirect({ method: "POST" }, buildVerificationUrl("/ivr/verify", complaintId, callbackUrl, safeAttempt + 1));
   } else {
-    twiml.pause({ length: 5 });
+    twiml.pause({ length: POST_AUDIO_HANGUP_DELAY_SECONDS });
     twiml.hangup();
   }
 
@@ -640,6 +642,7 @@ app.all("/ivr/verify/response", async (req, res) => {
       twiml.say({ language: "gu-IN", voice: "alice" }, "આભાર. તમારી ફરિયાદ ફરી તપાસ માટે ખોલવામાં આવી છે.");
     }
 
+    twiml.pause({ length: POST_AUDIO_HANGUP_DELAY_SECONDS });
     twiml.hangup();
     res.type("text/xml");
     res.send(twiml.toString());
@@ -649,7 +652,7 @@ app.all("/ivr/verify/response", async (req, res) => {
   if (safeAttempt < MAX_VERIFICATION_ATTEMPTS) {
     twiml.redirect({ method: "POST" }, buildVerificationUrl("/ivr/verify", complaintId, callbackUrl, safeAttempt + 1));
   } else {
-    twiml.pause({ length: 5 });
+    twiml.pause({ length: POST_AUDIO_HANGUP_DELAY_SECONDS });
     twiml.hangup();
   }
 

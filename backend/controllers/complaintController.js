@@ -10,10 +10,18 @@ const { extractImageGps } = require('../utils/imageGps');
 const { getImportedIvrComplaints, syncIvrCallsToComplaints } = require('../services/ivrComplaintSyncService');
 
 const GRIEVANCE_DEPARTMENT_MAP = {
-  pothole: 'Roads',
-  leakage: 'Water',
+  pothole: 'Road',
+  leakage: 'Drainage',
   'power cut': 'Electricity',
-  garbage: 'Sanitation'
+  garbage: 'Garbage'
+};
+
+const DEPARTMENT_CATEGORY_ALIASES = {
+  Road: ['road', 'roads', 'roadmaintenance', 'street', 'highway', 'pothole', 'pavement'],
+  Garbage: ['garbage', 'waste', 'trash', 'sanitation', 'cleaning'],
+  Drainage: ['drainage', 'drain', 'water', 'leak', 'leakage', 'sewage', 'pipeline'],
+  Electricity: ['electricity', 'electric', 'power', 'light', 'lighting', 'streetlight'],
+  Other: ['other', 'general', 'misc']
 };
 
 const GPS_MATCH_THRESHOLD_METERS = 100;
@@ -224,7 +232,18 @@ function normalizeDepartment(department) {
   }
 
   const normalized = department.trim();
-  return normalized.length ? normalized : null;
+  if (!normalized.length) {
+    return null;
+  }
+
+  const key = normalized.toLowerCase().replace(/[^a-z]/g, '');
+  for (const [canonical, aliases] of Object.entries(DEPARTMENT_CATEGORY_ALIASES)) {
+    if (aliases.some((alias) => key.includes(alias))) {
+      return canonical;
+    }
+  }
+
+  return 'Other';
 }
 
 function inferDepartmentFromGrievanceType(grievanceType) {
@@ -257,9 +276,10 @@ async function getNearbyComplaintsByLocation(point, radiusMeters, grievanceType)
 }
 
 async function findOfficerForDepartment(point, department) {
-  return User.findOne({
+  const normalizedDepartment = normalizeDepartment(department);
+
+  const officers = await User.find({
     role: 'officer',
-    department,
     location: {
       $near: {
         $geometry: point,
@@ -267,6 +287,9 @@ async function findOfficerForDepartment(point, department) {
       }
     }
   }).sort({ points: -1 }).lean();
+
+  const matchedOfficer = officers.find((officer) => normalizeDepartment(officer.department) === normalizedDepartment);
+  return matchedOfficer || null;
 }
 
 function serializeComplaint(complaint) {
@@ -448,7 +471,7 @@ const createComplaint = asyncHandler(async (req, res) => {
     ? classification.best.department
     : null;
 
-  const department = aiDepartment || fallbackDepartment || classification?.best?.department || 'General';
+  const department = normalizeDepartment(aiDepartment || fallbackDepartment || classification?.best?.department || 'Other');
 
   if (!department) {
     res.status(400);
@@ -611,7 +634,7 @@ const createTextComplaint = asyncHandler(async (req, res) => {
 
   const resolvedGrievanceId = await buildUniqueGrievanceId(grievance_id);
 
-  const department = resolveDepartment(departmentInput, grievance_type) || 'General';
+  const department = normalizeDepartment(resolveDepartment(departmentInput, grievance_type) || 'Other');
   const duplicateCategoryFamily = inferDuplicateCategoryFamily(grievance_type, department || departmentInput);
   const parsedLat = parseNumber(lat, 0);
   const parsedLng = parseNumber(lng, 0);
@@ -821,7 +844,7 @@ const startComplaintWork = asyncHandler(async (req, res) => {
     throw new Error('Complaint not found');
   }
 
-  if (complaint.department !== req.user.department) {
+  if (normalizeDepartment(complaint.department) !== normalizeDepartment(req.user.department)) {
     res.status(403);
     throw new Error('You can only start complaints in your department');
   }

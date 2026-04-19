@@ -98,7 +98,7 @@ function OfficerIvrComplaintsPage() {
 
             <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm leading-7 text-slate-700">
               <p className="font-semibold text-slate-900">IVR Transcript</p>
-              <p className="mt-1">{complaint.description}</p>
+              <p className="mt-1">{complaint.transcriptionText || complaint.ivrTranscriptionText || complaint.description || "Transcript not available"}</p>
             </div>
 
             {complaint.scoring?.scoreReason ? (

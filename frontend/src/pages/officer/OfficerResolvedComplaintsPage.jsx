@@ -6,6 +6,7 @@ import { triggerOfficerVerificationCall } from "../../services/backendApi";
 
 function OfficerResolvedComplaintsPage() {
   const { complaints, user, refreshComplaints } = useContext(AppContext);
+  const [departmentFilter, setDepartmentFilter] = useState("ALL");
   const [workingId, setWorkingId] = useState(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -17,6 +18,14 @@ function OfficerResolvedComplaintsPage() {
       return belongsToOfficer && isResolvedState;
     }),
     [complaints, user?.id]
+  );
+  const departmentOptions = useMemo(
+    () => Array.from(new Set(resolvedComplaints.map((item) => item.department).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [resolvedComplaints]
+  );
+  const visibleComplaints = useMemo(
+    () => resolvedComplaints.filter((item) => departmentFilter === "ALL" || item.department === departmentFilter),
+    [resolvedComplaints, departmentFilter]
   );
 
   const callAgain = async (complaintId) => {
@@ -43,11 +52,21 @@ function OfficerResolvedComplaintsPage() {
         <p className="mt-2 text-sm leading-7 text-slate-600">Stored complaints after officer resolution, with a separate follow-up tab for IVR re-calls.</p>
       </div>
 
+      <div className="max-w-xs">
+        <label className="text-sm">
+          <span className="mb-2 block font-semibold text-slate-700">Department</span>
+          <select value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900">
+            <option value="ALL">All Departments</option>
+            {departmentOptions.map((department) => <option key={department} value={department}>{department}</option>)}
+          </select>
+        </label>
+      </div>
+
       {message ? <p className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</p> : null}
       {error ? <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
       <div className="grid gap-4">
-        {resolvedComplaints.map((complaint) => {
+        {visibleComplaints.map((complaint) => {
           const canTriggerAgain = complaint.status === "Resolved" && complaint.verificationStatus === "Pending";
 
           return (
@@ -87,7 +106,7 @@ function OfficerResolvedComplaintsPage() {
         })}
       </div>
 
-      {!resolvedComplaints.length ? (
+      {!visibleComplaints.length ? (
         <div className="rounded-[2rem] border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-card">
           No resolved complaints are available yet.
         </div>

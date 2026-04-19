@@ -4,17 +4,19 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 const DEPARTMENTS = [
+  "Road",
+  "Garbage",
+  "Drainage",
   "Electricity",
-  "Sanitation",
-  "Water",
-  "Roads"
+  "Other"
 ];
 
 const DEPARTMENT_KEYWORDS = {
-  "Electricity": ["power", "light", "electricity", "blackout", "outage", "bulb", "pole", "wire", "current", "volt", "electric", "supply"],
-  "Sanitation": ["garbage", "waste", "trash", "litter", "filth", "dump", "sanitation", "cleaning", "dirt", "sewage", "hygiene"],
-  "Water": ["water", "leak", "leakage", "drainage", "drain", "pipe", "stagnant", "flood", "sewage", "tap", "supply", "pipeline"],
-  "Roads": ["road", "pothole", "potholes", "pavement", "asphalt", "street", "highway", "surface", "damage", "crack", "repair", "lane"]
+  "Road": ["road", "roads", "pothole", "potholes", "pavement", "asphalt", "street", "highway", "surface", "damage", "crack", "repair", "lane"],
+  "Garbage": ["garbage", "waste", "trash", "litter", "filth", "dump", "sanitation", "cleaning", "hygiene"],
+  "Drainage": ["drainage", "drain", "water", "leak", "leakage", "pipe", "sewage", "tap", "supply", "pipeline", "stagnant", "flood"],
+  "Electricity": ["power", "light", "electricity", "blackout", "outage", "bulb", "pole", "wire", "current", "volt", "electric"],
+  "Other": ["other", "general", "misc"]
 };
 
 // Predict department from image using Groq
@@ -65,7 +67,7 @@ export async function predictDepartmentFromImage(imageUrl) {
     }
 
     // Fallback if Groq returns something unexpected
-    return null;
+    return "Other";
   } catch (error) {
     console.error('Groq department prediction error:', error.message);
     return null;
@@ -125,7 +127,7 @@ export async function predictDepartmentFromText(text) {
 
 // Keyword-based fallback for department prediction
 function predictDepartmentFromKeywords(text) {
-  if (!text) return null;
+  if (!text) return "Other";
 
   const lowerText = text.toLowerCase();
   const scores = {};
@@ -149,19 +151,16 @@ function predictDepartmentFromKeywords(text) {
     current[1] > prev[1] ? current : prev
   );
 
-  // Return department if score > 0, else null
-  return bestDept[1] > 0 ? bestDept[0] : null;
+  // Return department if score > 0, else Other
+  return bestDept[1] > 0 ? bestDept[0] : "Other";
 }
 
   const GRIEVANCE_TYPES = [
-    'pothole',
-    'leakage',
-    'power_cut',
+    'road',
     'garbage',
-    'traffic_signal',
-    'street_light',
-    'pavement_damage',
-    'water_supply'
+    'drainage',
+    'electricity',
+    'other'
   ];
 
   // Predict grievance type from image and description
@@ -279,8 +278,8 @@ export async function predictComplaintMetadataFromText(text) {
       console.warn('GROQ_API_KEY not configured. Using defaults for text metadata.');
       return {
         title: text.substring(0, 100) || 'IVR Complaint',
-        department: 'General',
-        grievanceType: 'general'
+        department: 'Other',
+        grievanceType: 'other'
       };
     }
 
@@ -294,8 +293,8 @@ export async function predictComplaintMetadataFromText(text) {
             content: `Analyze this IVR complaint transcript and extract metadata. Return ONLY a JSON object with these keys (no markdown, no extra text):
             {
               "title": "short, clear complaint title (max 50 chars)",
-              "department": "one of: Electricity, Sanitation, Water, Roads, General",
-              "grievanceType": "one of: pothole, leakage, power_cut, garbage, general"
+              "department": "one of: Road, Garbage, Drainage, Electricity, Other",
+              "grievanceType": "one of: road, garbage, drainage, electricity, other"
             }
             
             Transcript: "${text}"
@@ -317,8 +316,8 @@ export async function predictComplaintMetadataFromText(text) {
     if (!content) {
       return {
         title: text.substring(0, 100) || 'IVR Complaint',
-        department: 'General',
-        grievanceType: 'general'
+        department: 'Other',
+        grievanceType: 'other'
       };
     }
 
@@ -327,22 +326,23 @@ export async function predictComplaintMetadataFromText(text) {
       const parsed = JSON.parse(cleaned);
       return {
         title: parsed.title || 'IVR Complaint',
-        department: DEPARTMENTS.includes(parsed.department) ? parsed.department : 'General',
-        grievanceType: parsed.grievanceType || 'general'
+        department: DEPARTMENTS.includes(parsed.department) ? parsed.department : 'Other',
+        grievanceType: parsed.grievanceType || 'other'
       };
     } catch (parseError) {
       console.warn('Failed to parse Groq JSON response:', parseError.message);
       return {
         title: text.substring(0, 100) || 'IVR Complaint',
-        department: 'General',
-        grievanceType: 'general'
+        department: 'Other',
+        grievanceType: 'other'
       };
     }
   } catch (error) {
     console.error('Groq complaint metadata prediction error:', error.message);
     return {
       title: text.substring(0, 100) || 'IVR Complaint',
-      department: 'General',
-      grievanceType: 'general'
+      department: 'Other',
+      grievanceType: 'other'
     };
   }
+}

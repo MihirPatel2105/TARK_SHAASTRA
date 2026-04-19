@@ -10,6 +10,15 @@ const IVR_COLLECTION_CANDIDATES = [
   'ivr_calls'
 ].filter(Boolean);
 
+const IVR_DATABASE_CANDIDATES = [
+  process.env.IVR_CALL_DATABASE,
+  'IVRCALLData'
+].filter(Boolean);
+
+function uniqueStrings(values) {
+  return Array.from(new Set(values.filter(Boolean).map((value) => String(value).trim()).filter(Boolean)));
+}
+
 function normalizePhoneNumber(value) {
   const raw = String(value || '').trim();
   if (!raw) {
@@ -78,15 +87,26 @@ async function buildUniqueGrievanceId(prefix, record) {
 }
 
 async function getIvrCollection() {
-  if (!mongoose.connection.db) {
+  if (!mongoose.connection.db || !mongoose.connection.client) {
     throw new Error('MongoDB connection is not ready');
   }
 
-  const collectionNames = await mongoose.connection.db.listCollections().toArray();
-  const availableNames = new Set(collectionNames.map((entry) => entry.name));
-  const selectedName = IVR_COLLECTION_CANDIDATES.find((name) => availableNames.has(name)) || IVR_COLLECTION_CANDIDATES[0];
+  const currentDbName = mongoose.connection.db.databaseName;
+  const dbCandidates = uniqueStrings([...IVR_DATABASE_CANDIDATES, currentDbName]);
+  const collectionCandidates = uniqueStrings(IVR_COLLECTION_CANDIDATES);
 
-  return mongoose.connection.db.collection(selectedName);
+  for (const dbName of dbCandidates) {
+    const db = mongoose.connection.client.db(dbName);
+    const collections = await db.listCollections().toArray();
+    const availableNames = new Set(collections.map((entry) => entry.name));
+    const selectedName = collectionCandidates.find((name) => availableNames.has(name));
+
+    if (selectedName) {
+      return db.collection(selectedName);
+    }
+  }
+
+  return mongoose.connection.db.collection(collectionCandidates[0] || 'ivr_calls');
 }
 
 async function findOrCreateCitizenFromCaller(callerNumber, recordId) {

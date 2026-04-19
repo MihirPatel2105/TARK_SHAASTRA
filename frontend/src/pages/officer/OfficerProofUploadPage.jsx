@@ -5,6 +5,7 @@ import { resolveOfficerComplaint } from "../../services/backendApi";
 
 function OfficerProofUploadPage() {
   const { complaints, refreshComplaints } = useContext(AppContext);
+  const [departmentFilter, setDepartmentFilter] = useState("ALL");
   const officerCases = useMemo(
     () =>
       complaints.filter((item) => item.status === "Pending" || item.status === "In Progress" || item.status === "Reopened"),
@@ -14,6 +15,14 @@ function OfficerProofUploadPage() {
     () => officerCases.filter((item) => String(item.source || "").toUpperCase() === "IVR_CALL"),
     [officerCases]
   );
+  const departmentOptions = useMemo(
+    () => Array.from(new Set(officerCases.map((item) => item.department).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [officerCases]
+  );
+  const filteredCases = useMemo(
+    () => officerCases.filter((item) => departmentFilter === "ALL" || item.department === departmentFilter),
+    [officerCases, departmentFilter]
+  );
   const [complaintId, setComplaintId] = useState("");
   const [photo, setPhoto] = useState(null);
   const [gps, setGps] = useState("");
@@ -21,20 +30,20 @@ function OfficerProofUploadPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!officerCases.length) {
+    if (!filteredCases.length) {
       setComplaintId("");
       return;
     }
 
     setComplaintId((previousId) => {
-      const stillExists = officerCases.some((item) => item.id === previousId);
-      return stillExists ? previousId : officerCases[0].id;
+      const stillExists = filteredCases.some((item) => item.id === previousId);
+      return stillExists ? previousId : filteredCases[0].id;
     });
-  }, [officerCases]);
+  }, [filteredCases]);
 
   const selectedComplaint = useMemo(
-    () => officerCases.find((item) => item.id === complaintId) || null,
-    [officerCases, complaintId]
+    () => filteredCases.find((item) => item.id === complaintId) || null,
+    [filteredCases, complaintId]
   );
 
   const submit = async (markAsFake = false) => {
@@ -104,19 +113,27 @@ function OfficerProofUploadPage() {
           </p>
         ) : null}
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-3">
+          <select
+            value={departmentFilter}
+            onChange={(event) => setDepartmentFilter(event.target.value)}
+            className="rounded-2xl border border-slate-300 px-4 py-3 text-slate-900"
+          >
+            <option value="ALL">All Departments</option>
+            {departmentOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
           <select
             value={complaintId}
             onChange={(event) => setComplaintId(event.target.value)}
-            disabled={!officerCases.length}
+            disabled={!filteredCases.length}
             className="rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 disabled:cursor-not-allowed disabled:bg-slate-100"
           >
-            {officerCases.map((item) => <option key={item.id} value={item.id}>{item.id} - {item.title}</option>)}
+            {filteredCases.map((item) => <option key={item.id} value={item.id}>{item.id} - {item.title}</option>)}
           </select>
 
           <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
             <UploadCloud size={16} />
-              <input type="file" accept="image/*" className="hidden" disabled={!officerCases.length} onChange={(event) => setPhoto(event.target.files?.[0] || null)} />
+              <input type="file" accept="image/*" className="hidden" disabled={!filteredCases.length} onChange={(event) => setPhoto(event.target.files?.[0] || null)} />
             {photo ? photo.name : "Upload photo proof"}
           </label>
         </div>
@@ -126,7 +143,7 @@ function OfficerProofUploadPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Selected Complaint</p>
             <h3 className="mt-2 text-lg font-semibold text-slate-900">{selectedComplaint.title}</h3>
             <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Source: {String(selectedComplaint.source || "APP_TEXT").toUpperCase() === "IVR_CALL" ? "IVR Call" : "App Complaint"}</p>
-            <p className="mt-2 text-sm leading-7 text-slate-700">{selectedComplaint.description}</p>
+            <p className="mt-2 text-sm leading-7 text-slate-700">{selectedComplaint.transcriptionText || selectedComplaint.ivrTranscriptionText || selectedComplaint.description}</p>
             {selectedComplaint.imageUrl ? (
               <img
                 src={selectedComplaint.imageUrl}
@@ -139,16 +156,16 @@ function OfficerProofUploadPage() {
 
         <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
           <input value={gps} readOnly placeholder="GPS location" className="rounded-2xl border border-slate-300 px-4 py-3 text-slate-900" />
-          <button type="button" onClick={captureGps} disabled={!officerCases.length} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50">
+          <button type="button" onClick={captureGps} disabled={!filteredCases.length} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50">
             <LocateFixed size={16} /> Capture GPS
           </button>
         </div>
 
         <div className="mt-4 flex flex-wrap gap-3">
-          <button type="button" onClick={() => submit(false)} disabled={isSubmitting || !officerCases.length} className="rounded-2xl bg-emerald-700 px-5 py-3 font-semibold text-white shadow-lg shadow-emerald-700/20 disabled:cursor-not-allowed disabled:opacity-60">
+          <button type="button" onClick={() => submit(false)} disabled={isSubmitting || !filteredCases.length} className="rounded-2xl bg-emerald-700 px-5 py-3 font-semibold text-white shadow-lg shadow-emerald-700/20 disabled:cursor-not-allowed disabled:opacity-60">
             {isSubmitting ? "Submitting..." : "Submit Evidence"}
           </button>
-          <button type="button" onClick={() => submit(true)} disabled={isSubmitting || !officerCases.length} className="rounded-2xl bg-rose-700 px-5 py-3 font-semibold text-white shadow-lg shadow-rose-700/20 disabled:cursor-not-allowed disabled:opacity-60">
+          <button type="button" onClick={() => submit(true)} disabled={isSubmitting || !filteredCases.length} className="rounded-2xl bg-rose-700 px-5 py-3 font-semibold text-white shadow-lg shadow-rose-700/20 disabled:cursor-not-allowed disabled:opacity-60">
             {isSubmitting ? "Submitting..." : "Mark Fake Complaint"}
           </button>
         </div>

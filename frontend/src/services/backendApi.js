@@ -210,6 +210,28 @@ function titleCaseStatus(status) {
     .join(" ");
 }
 
+function normalizeDepartment(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "Other";
+  }
+
+  const key = raw.toLowerCase().replace(/[^a-z]/g, "");
+  if (["road", "roads", "roadmaintenance", "street", "highway", "pothole", "pavement"].some((v) => key.includes(v))) {
+    return "Road";
+  }
+  if (["garbage", "waste", "trash", "sanitation", "cleaning"].some((v) => key.includes(v))) {
+    return "Garbage";
+  }
+  if (["drainage", "drain", "water", "leak", "leakage", "sewage", "pipeline"].some((v) => key.includes(v))) {
+    return "Drainage";
+  }
+  if (["electricity", "electric", "power", "light", "streetlight"].some((v) => key.includes(v))) {
+    return "Electricity";
+  }
+  return "Other";
+}
+
 export function toUiComplaint(complaint) {
   const coordinates = complaint.coordinates || complaint.location?.coordinates || [0, 0];
   const [lng, lat] = coordinates;
@@ -231,8 +253,9 @@ export function toUiComplaint(complaint) {
     id: complaint.id || complaint._id,
     grievanceId: complaint.grievance_id || null,
     title: complaint.title,
-    description: complaint.description,
-    department: complaint.department,
+    description: complaint.ivr_transcription_text || complaint.description,
+    transcriptionText: complaint.ivr_transcription_text || complaint.transcriptionText || complaint.description || null,
+    department: normalizeDepartment(complaint.department),
       district: complaint.district || null,
     grievanceType: complaint.grievance_type || null,
     status: titleCaseStatus(complaint.status),

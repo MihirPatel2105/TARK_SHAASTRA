@@ -1,8 +1,9 @@
 export const departments = [
+  "Road",
+  "Garbage",
+  "Drainage",
   "Electricity",
-  "Sanitation",
-  "Water",
-  "Roads"
+  "Other"
 ];
 
 export const departmentOptions = departments;
