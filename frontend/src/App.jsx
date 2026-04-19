@@ -54,17 +54,13 @@ function App() {
   const [user, setUser] = useState(() => {
     const storedUser = loadStoredUser();
     const token = loadAuthToken();
-    
-    // Only use stored user if we also have a valid JWT token
-    // Valid JWTs have format: xxx.yyy.zzz (3 parts separated by dots)
+
     if (storedUser && token && typeof token === 'string' && token.includes('.')) {
       const parts = token.split('.');
       if (parts.length === 3 && parts.every(p => p.length > 0)) {
         return storedUser;
       }
     }
-    
-    // Invalid or missing token - clear session and start fresh at login
     clearSession();
     return null;
   });

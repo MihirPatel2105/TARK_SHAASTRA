@@ -162,6 +162,23 @@ async function getPotentialDuplicateComplaints({ categoryFamily, point, title, d
   return duplicates;
 }
 
+async function buildUniqueGrievanceId(inputValue) {
+  const seed = String(inputValue || `GRV-${Date.now()}`)
+    .trim()
+    .replace(/\s+/g, '-')
+    .slice(0, 80);
+
+  let candidate = seed || `GRV-${Date.now()}`;
+  let suffix = 1;
+
+  while (await Complaint.exists({ grievance_id: candidate })) {
+    suffix += 1;
+    candidate = `${seed}-${suffix}`;
+  }
+
+  return candidate;
+}
+
 function parseNumber(value, fallback = null) {
   if (value === undefined || value === null || value === '') {
     return fallback;
@@ -356,9 +373,9 @@ const createComplaint = asyncHandler(async (req, res) => {
     force_create
   } = req.body;
 
-  if (!grievance_id || !title || !description || !grievance_type) {
+  if (!title || !description || !grievance_type) {
     res.status(400);
-    throw new Error('grievance_id, title, description, and grievance_type are required');
+    throw new Error('title, description, and grievance_type are required');
   }
 
   const fallbackDepartment = resolveDepartment(departmentInput, grievance_type);
@@ -389,11 +406,7 @@ const createComplaint = asyncHandler(async (req, res) => {
     ? (userImageDistanceMeters <= GPS_MATCH_THRESHOLD_METERS ? 1 : 0)
     : 1;
 
-  const existing = await Complaint.findOne({ grievance_id }).lean();
-  if (existing) {
-    res.status(409);
-    throw new Error('Complaint with this grievance_id already exists');
-  }
+  const resolvedGrievanceId = await buildUniqueGrievanceId(grievance_id);
 
   const nearbyComplaints = await getNearbyComplaintsByLocation(location, 500, grievance_type);
   if (nearbyComplaints.length > 0 && !['true', true, 1, '1'].includes(force_create)) {
@@ -446,7 +459,7 @@ const createComplaint = asyncHandler(async (req, res) => {
     : await findOfficerForDepartment(location, department);
 
   const complaint = await Complaint.create({
-    grievance_id,
+    grievance_id: resolvedGrievanceId,
     title,
     description,
     department,
@@ -590,10 +603,12 @@ const createTextComplaint = asyncHandler(async (req, res) => {
     force_create
   } = req.body;
 
-  if (!grievance_id || !title || !description || !grievance_type) {
+  if (!title || !description || !grievance_type) {
     res.status(400);
-    throw new Error('grievance_id, title, description, and grievance_type are required');
+    throw new Error('title, description, and grievance_type are required');
   }
+
+  const resolvedGrievanceId = await buildUniqueGrievanceId(grievance_id);
 
   const department = resolveDepartment(departmentInput, grievance_type) || 'General';
   const duplicateCategoryFamily = inferDuplicateCategoryFamily(grievance_type, department || departmentInput);
@@ -625,7 +640,7 @@ const createTextComplaint = asyncHandler(async (req, res) => {
   }
 
   const complaint = await Complaint.create({
-    grievance_id,
+    grievance_id: resolvedGrievanceId,
     title,
     description,
     department,

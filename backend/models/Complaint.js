@@ -7,7 +7,6 @@ const ComplaintSchema = new Schema(
     grievance_id: {
       type: String,
       required: true,
-      unique: true,
       index: true
     },
     title: {
