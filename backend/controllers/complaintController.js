@@ -16,6 +16,151 @@ const GRIEVANCE_DEPARTMENT_MAP = {
 };
 
 const GPS_MATCH_THRESHOLD_METERS = 100;
+const DUPLICATE_LOOKBACK_DAYS = 30;
+const DUPLICATE_RADIUS_METERS = 700;
+const DUPLICATE_CATEGORY_ALIASES = {
+  roads: ['road', 'roads', 'roadmaintenance', 'pothole', 'street', 'streetlight'],
+  electricity: ['electricity', 'power', 'powercut', 'electric', 'lighting'],
+  water: ['water', 'leakage', 'drainage', 'sewage', 'pipeline'],
+  sanitation: ['sanitation', 'garbage', 'waste', 'cleaning'],
+  publicsafety: ['publicsafety', 'safety', 'security'],
+  general: ['general']
+};
+
+function normalizeTextForDuplicate(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeCategoryKey(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function inferDuplicateCategoryFamily(grievanceType, department) {
+  const source = `${normalizeCategoryKey(grievanceType)} ${normalizeCategoryKey(department)}`.trim();
+  if (!source) {
+    return 'general';
+  }
+
+  for (const [family, aliases] of Object.entries(DUPLICATE_CATEGORY_ALIASES)) {
+    if (aliases.some((alias) => source.includes(alias))) {
+      return family;
+    }
+  }
+
+  return source;
+}
+
+function buildCategoryOrFilters(categoryFamily) {
+  const aliases = DUPLICATE_CATEGORY_ALIASES[categoryFamily] || [categoryFamily];
+  return aliases.flatMap((alias) => {
+    const regex = new RegExp(escapeRegExp(alias), 'i');
+    return [
+      { grievance_type: regex },
+      { department: regex }
+    ];
+  });
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildDuplicateRegex(value) {
+  const normalized = normalizeTextForDuplicate(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const tokens = normalized
+    .split(' ')
+    .filter((token) => token.length >= 4)
+    .slice(0, 8);
+
+  if (!tokens.length) {
+    return null;
+  }
+
+  return new RegExp(tokens.map(escapeRegExp).join('|'), 'i');
+}
+
+function hasUsablePoint(point) {
+  const coordinates = point?.coordinates;
+  if (!Array.isArray(coordinates) || coordinates.length < 2) {
+    return false;
+  }
+
+  const [lng, lat] = coordinates.map(Number);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return false;
+  }
+
+  // Treat [0,0] placeholder as not usable for duplicate geo matching.
+  return Math.abs(lat) > 0.000001 || Math.abs(lng) > 0.000001;
+}
+
+async function getPotentialDuplicateComplaints({ categoryFamily, point, title, description, district, createdBy }) {
+  const lookbackDate = new Date(Date.now() - DUPLICATE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  const baseQuery = {
+    status: { $in: ['PENDING', 'IN_PROGRESS', 'RESOLVED', 'REOPENED', 'VERIFIED'] },
+    created_at: { $gte: lookbackDate }
+  };
+
+  if (district && typeof district === 'string' && district.trim().length) {
+    baseQuery.district = district.trim();
+  }
+
+  if (hasUsablePoint(point)) {
+    baseQuery.location = {
+      $near: {
+        $geometry: point,
+        $maxDistance: DUPLICATE_RADIUS_METERS
+      }
+    };
+  }
+
+  const titleRegex = buildDuplicateRegex(title);
+  const descriptionRegex = buildDuplicateRegex(description);
+  const textOr = [];
+
+  if (titleRegex) {
+    textOr.push({ title: titleRegex }, { description: titleRegex });
+  }
+
+  if (descriptionRegex) {
+    textOr.push({ title: descriptionRegex }, { description: descriptionRegex });
+  }
+
+  const categoryOr = buildCategoryOrFilters(categoryFamily);
+  const andFilters = [baseQuery];
+
+  if (categoryOr.length) {
+    andFilters.push({ $or: categoryOr });
+  }
+
+  if (textOr.length) {
+    andFilters.push({ $or: textOr });
+  }
+
+  // If location and useful text are unavailable, fallback to same reporter + grievance type recent duplicate check.
+  if (!baseQuery.location && !textOr.length && createdBy) {
+    baseQuery.created_by = createdBy;
+  }
+
+  const query = andFilters.length === 1 ? baseQuery : { $and: andFilters };
+
+  const duplicates = await Complaint.find(query)
+    .sort({ votes: -1, created_at: -1 })
+    .limit(10)
+    .lean();
+
+  return duplicates;
+}
 
 function parseNumber(value, fallback = null) {
   if (value === undefined || value === null || value === '') {
@@ -217,6 +362,10 @@ const createComplaint = asyncHandler(async (req, res) => {
   }
 
   const fallbackDepartment = resolveDepartment(departmentInput, grievance_type);
+  const duplicateCategoryFamily = inferDuplicateCategoryFamily(grievance_type, fallbackDepartment || departmentInput);
+  const resolvedCreatedBy = mongoose.Types.ObjectId.isValid(created_by)
+    ? created_by
+    : req.user?._id;
 
   const location = buildPointFromBody(req.body);
   if (!location) {
@@ -251,6 +400,22 @@ const createComplaint = asyncHandler(async (req, res) => {
     return res.status(409).json({
       message: 'A similar complaint already exists nearby. Vote on the existing complaint instead.',
       duplicate_suggestions: nearbyComplaints.map(serializeComplaint)
+    });
+  }
+
+  const potentialDuplicates = await getPotentialDuplicateComplaints({
+    categoryFamily: duplicateCategoryFamily,
+    point: location,
+    title,
+    description,
+    district,
+    createdBy: resolvedCreatedBy
+  });
+
+  if (potentialDuplicates.length > 0 && !['true', true, 1, '1'].includes(force_create)) {
+    return res.status(409).json({
+      message: 'Possible duplicate complaint detected. Please review existing complaints before submitting.',
+      duplicate_suggestions: potentialDuplicates.map(serializeComplaint)
     });
   }
 
@@ -421,7 +586,8 @@ const createTextComplaint = asyncHandler(async (req, res) => {
     created_by,
     district,
     lat,
-    lng
+    lng,
+    force_create
   } = req.body;
 
   if (!grievance_id || !title || !description || !grievance_type) {
@@ -430,12 +596,33 @@ const createTextComplaint = asyncHandler(async (req, res) => {
   }
 
   const department = resolveDepartment(departmentInput, grievance_type) || 'General';
+  const duplicateCategoryFamily = inferDuplicateCategoryFamily(grievance_type, department || departmentInput);
   const parsedLat = parseNumber(lat, 0);
   const parsedLng = parseNumber(lng, 0);
   const point = buildPointFromLatLng(parsedLat, parsedLng) || {
     type: 'Point',
     coordinates: [0, 0]
   };
+
+  const resolvedCreatedBy = mongoose.Types.ObjectId.isValid(created_by)
+    ? created_by
+    : req.user?._id;
+
+  const potentialDuplicates = await getPotentialDuplicateComplaints({
+    categoryFamily: duplicateCategoryFamily,
+    point,
+    title,
+    description,
+    district,
+    createdBy: resolvedCreatedBy
+  });
+
+  if (potentialDuplicates.length > 0 && !['true', true, 1, '1'].includes(force_create)) {
+    return res.status(409).json({
+      message: 'Possible duplicate complaint detected. Please review existing complaints before submitting.',
+      duplicate_suggestions: potentialDuplicates.map(serializeComplaint)
+    });
+  }
 
   const complaint = await Complaint.create({
     grievance_id,

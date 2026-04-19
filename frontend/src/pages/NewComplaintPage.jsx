@@ -343,7 +343,12 @@ function NewComplaintPage() {
     } catch (submitError) {
       const suggestions = submitError?.payload?.duplicate_suggestions;
       if (Array.isArray(suggestions) && suggestions.length > 0) {
-        setError(`${submitError.message} (${suggestions.length} nearby suggestion(s) found)`);
+        const topIds = suggestions
+          .slice(0, 3)
+          .map((item) => item?.grievance_id || item?.id)
+          .filter(Boolean)
+          .join(", ");
+        setError(`${submitError.message} (${suggestions.length} suggestion(s) found${topIds ? `: ${topIds}` : ""})`);
       } else {
         setError(submitError.message || "Unable to submit complaint.");
       }
