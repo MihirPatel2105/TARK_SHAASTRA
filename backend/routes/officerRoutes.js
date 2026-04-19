@@ -11,5 +11,7 @@ router.get('/complaints/needs-location', complaintController.getNeedsLocationCom
 router.post('/complaints/:id/start', complaintController.startComplaintWork);
 router.post('/complaints/:id/resolve', upload.single('image'), complaintController.resolveOfficerComplaint);
 router.post('/complaints/:id/trigger-ivr', complaintController.triggerOfficerVerificationCall);
+router.get('/ivr-complaints', complaintController.getOfficerIvrComplaints);
+router.post('/ivr-complaints/sync', complaintController.syncIvrComplaints);
 
 module.exports = router;

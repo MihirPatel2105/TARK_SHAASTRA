@@ -5,6 +5,7 @@ const path = require("path");
 const axios = require("axios");
 const twilio = require("twilio");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const mongoose = require("mongoose");
 
 const app = express();
 const VoiceResponse = twilio.twiml.VoiceResponse;
@@ -14,11 +15,22 @@ const twilioClient =
     ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
     : null;
 
+// Initialize MongoDB connection
+if (process.env.MONGODB_URI) {
+  mongoose.connect(process.env.MONGODB_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+  })
+  .then(() => console.log("[INFO] MongoDB connected for IVR persistence"))
+  .catch((err) => console.warn("[WARN] MongoDB connection failed:", err.message));
+}
+
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 const MAX_VERIFICATION_ATTEMPTS = Number.parseInt(process.env.IVR_MAX_ATTEMPTS || "2", 10) || 2;
+const MAX_RECORDING_ATTEMPTS = Number.parseInt(process.env.IVR_MAX_RECORDING_ATTEMPTS || "3", 10) || 3;
 
 const verificationResponses = [];
 const verificationSseClients = new Set();
@@ -692,11 +704,13 @@ app.all("/menu", (req, res) => {
 app.all("/record", (req, res) => {
   const twiml = new VoiceResponse();
   const language = getLanguageForRequest(req);
+  const attempt = Number.parseInt(String(req.body.attempt || req.query.attempt || "1"), 10);
+  const safeAttempt = Number.isNaN(attempt) || attempt < 1 ? 1 : attempt;
 
   sayPrompt(twiml, language, "start_recording");
 
   twiml.record({
-    action: webhookUrl("/recording"),
+    action: webhookUrl(`/recording?attempt=${encodeURIComponent(String(safeAttempt))}`),
     method: "POST",
     maxLength: 60,
     timeout: Number(process.env.RECORDING_SILENCE_TIMEOUT || 5),
@@ -704,9 +718,6 @@ app.all("/record", (req, res) => {
     finishOnKey: "#",
     trim: "trim-silence"
   });
-
-  sayPrompt(twiml, language, "no_recording");
-  twiml.redirect({ method: "POST" }, webhookUrl("/record"));
 
   res.type("text/xml");
   res.send(twiml.toString());
@@ -722,9 +733,21 @@ app.all("/recording", (req, res) => {
     const callerNumber = req.body.From || req.query.From || req.body.Caller || req.query.Caller || "Unknown";
     const callSid = req.body.CallSid || req.query.CallSid;
     const language = getLanguageForRequest(req);
+    const attempt = Number.parseInt(String(req.body.attempt || req.query.attempt || "1"), 10);
+    const safeAttempt = Number.isNaN(attempt) || attempt < 1 ? 1 : attempt;
 
-    if (!recordingUrl) {
-      throw new Error("RecordingUrl not found in Twilio webhook payload.");
+    if (!recordingUrl || recordingDuration === "0") {
+      if (safeAttempt < MAX_RECORDING_ATTEMPTS) {
+        sayPrompt(twiml, language, "no_recording");
+        twiml.redirect({ method: "POST" }, webhookUrl(`/record?attempt=${encodeURIComponent(String(safeAttempt + 1))}`));
+      } else {
+        sayPrompt(twiml, language, "generic_error");
+        twiml.hangup();
+      }
+
+      res.type("text/xml");
+      res.send(twiml.toString());
+      return;
     }
 
     const complaint = {
@@ -743,6 +766,22 @@ app.all("/recording", (req, res) => {
     complaints.push(complaint);
     broadcastComplaint(complaint);
 
+    // Persist to MongoDB
+    if (mongoose.connection.readyState === 1) {
+      const ivrCollection = mongoose.connection.db.collection('IVRCALLData');
+      ivrCollection.insertOne({
+        callerNumber,
+        recordingSid,
+        recordingDuration,
+        recordingUrl,
+        language,
+        transcriptionText: complaint.transcriptionText,
+        geminiSummary: complaint.geminiSummary,
+        processingStatus: complaint.processingStatus,
+        createdAt: new Date()
+      }).catch((err) => console.warn("[WARN] Failed to save IVR call to MongoDB:", err.message));
+    }
+
     console.log(`[INFO] Complaint saved: ${complaint.id}`);
     console.log(`[INFO] Caller number: ${callerNumber}`);
     console.log(`[INFO] Recording URL: ${recordingUrl}`);
@@ -758,6 +797,7 @@ app.all("/recording", (req, res) => {
     console.error("[ERROR] Failed to process complaint:", error.message);
 
     sayPrompt(twiml, "gu", "generic_error");
+    twiml.hangup();
   }
 
   res.type("text/xml");

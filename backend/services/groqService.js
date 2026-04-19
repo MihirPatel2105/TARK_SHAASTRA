@@ -271,3 +271,78 @@ function predictDepartmentFromKeywords(text) {
       return null;
     }
   }
+
+// Predict complaint metadata (title, department, grievance type) from IVR transcript text
+export async function predictComplaintMetadataFromText(text) {
+  try {
+    if (!GROQ_API_KEY) {
+      console.warn('GROQ_API_KEY not configured. Using defaults for text metadata.');
+      return {
+        title: text.substring(0, 100) || 'IVR Complaint',
+        department: 'General',
+        grievanceType: 'general'
+      };
+    }
+
+    const response = await axios.post(
+      GROQ_API_URL,
+      {
+        model: 'mixtral-8x7b-32768',
+        messages: [
+          {
+            role: 'user',
+            content: `Analyze this IVR complaint transcript and extract metadata. Return ONLY a JSON object with these keys (no markdown, no extra text):
+            {
+              "title": "short, clear complaint title (max 50 chars)",
+              "department": "one of: Electricity, Sanitation, Water, Roads, General",
+              "grievanceType": "one of: pothole, leakage, power_cut, garbage, general"
+            }
+            
+            Transcript: "${text}"
+            
+            Respond with ONLY valid JSON, nothing else.`
+          }
+        ],
+        max_tokens: 100
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const content = response.data.choices?.[0]?.message?.content?.trim();
+    if (!content) {
+      return {
+        title: text.substring(0, 100) || 'IVR Complaint',
+        department: 'General',
+        grievanceType: 'general'
+      };
+    }
+
+    try {
+      const cleaned = content.replace(/```json|```/gi, '').trim();
+      const parsed = JSON.parse(cleaned);
+      return {
+        title: parsed.title || 'IVR Complaint',
+        department: DEPARTMENTS.includes(parsed.department) ? parsed.department : 'General',
+        grievanceType: parsed.grievanceType || 'general'
+      };
+    } catch (parseError) {
+      console.warn('Failed to parse Groq JSON response:', parseError.message);
+      return {
+        title: text.substring(0, 100) || 'IVR Complaint',
+        department: 'General',
+        grievanceType: 'general'
+      };
+    }
+  } catch (error) {
+    console.error('Groq complaint metadata prediction error:', error.message);
+    return {
+      title: text.substring(0, 100) || 'IVR Complaint',
+      department: 'General',
+      grievanceType: 'general'
+    };
+  }

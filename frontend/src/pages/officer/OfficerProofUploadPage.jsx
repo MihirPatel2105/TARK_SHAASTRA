@@ -10,6 +10,10 @@ function OfficerProofUploadPage() {
       complaints.filter((item) => item.status === "Pending" || item.status === "In Progress" || item.status === "Reopened"),
     [complaints]
   );
+  const ivrCases = useMemo(
+    () => officerCases.filter((item) => String(item.source || "").toUpperCase() === "IVR_CALL"),
+    [officerCases]
+  );
   const [complaintId, setComplaintId] = useState("");
   const [photo, setPhoto] = useState(null);
   const [gps, setGps] = useState("");
@@ -89,6 +93,11 @@ function OfficerProofUploadPage() {
       </div>
 
       <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-card">
+        {ivrCases.length ? (
+          <p className="mb-4 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+            {ivrCases.length} IVR complaint(s) are available in this queue.
+          </p>
+        ) : null}
         {!officerCases.length ? (
           <p className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
             No complaints are available in your officer queue for proof upload.
@@ -116,6 +125,7 @@ function OfficerProofUploadPage() {
           <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Selected Complaint</p>
             <h3 className="mt-2 text-lg font-semibold text-slate-900">{selectedComplaint.title}</h3>
+            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Source: {String(selectedComplaint.source || "APP_TEXT").toUpperCase() === "IVR_CALL" ? "IVR Call" : "App Complaint"}</p>
             <p className="mt-2 text-sm leading-7 text-slate-700">{selectedComplaint.description}</p>
             {selectedComplaint.imageUrl ? (
               <img

@@ -38,7 +38,7 @@ const ComplaintSchema = new Schema(
     },
     source: {
       type: String,
-      enum: ['APP_IMAGE', 'APP_TEXT'],
+      enum: ['APP_IMAGE', 'APP_TEXT', 'IVR_CALL'],
       default: 'APP_IMAGE',
       index: true
     },
@@ -249,6 +249,36 @@ const ComplaintSchema = new Schema(
         enum: [0, 1],
         default: 0
       }
+    },
+    ivr_call_id: {
+      type: String,
+      default: null,
+      index: true
+    },
+    ivr_caller_number: {
+      type: String,
+      default: null,
+      index: true
+    },
+    ivr_recording_sid: {
+      type: String,
+      default: null
+    },
+    ivr_recording_url: {
+      type: String,
+      default: null
+    },
+    ivr_transcription_text: {
+      type: String,
+      default: null
+    },
+    ivr_summary: {
+      type: String,
+      default: null
+    },
+    ivr_processing_status: {
+      type: String,
+      default: null
     }
   },
   {

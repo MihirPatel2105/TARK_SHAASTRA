@@ -7,6 +7,7 @@ const { classifyImageByAllModels } = require('../services/roboflowService');
 const { triggerResolutionVerificationCall } = require('../services/speechIvrService');
 const { haversineDistanceMeters } = require('../utils/geo');
 const { extractImageGps } = require('../utils/imageGps');
+const { getImportedIvrComplaints, syncIvrCallsToComplaints } = require('../services/ivrComplaintSyncService');
 
 const GRIEVANCE_DEPARTMENT_MAP = {
   pothole: 'Roads',
@@ -1283,6 +1284,42 @@ const predictComplaintDetails = asyncHandler(async (req, res) => {
   }
 });
 
+const getOfficerIvrComplaints = asyncHandler(async (req, res) => {
+  if (!req.user.department) {
+    res.status(400);
+    throw new Error('Officer department is required on user profile');
+  }
+
+  const complaints = await getImportedIvrComplaints();
+
+  res.json({
+    officer: {
+      id: req.user._id,
+      department: req.user.department,
+      role: req.user.role
+    },
+    count: complaints.length,
+    complaints: complaints.map(serializeComplaint)
+  });
+});
+
+const syncIvrComplaints = asyncHandler(async (req, res) => {
+  if (!req.user.department) {
+    res.status(400);
+    throw new Error('Officer department is required on user profile');
+  }
+
+  const result = await syncIvrCallsToComplaints();
+
+  res.json({
+    message: 'IVR complaints synchronized successfully',
+    importedCount: result.imported.length,
+    skippedCount: result.skipped.length,
+    scannedCount: result.scanned,
+    complaints: result.imported.map(serializeComplaint)
+  });
+});
+
 module.exports = {
   createComplaint,
   createTextComplaint,
@@ -1295,6 +1332,8 @@ module.exports = {
   resolveComplaint,
   ingestIvrVerificationResponse,
   getOfficerComplaints,
+  getOfficerIvrComplaints,
+  syncIvrComplaints,
   startComplaintWork,
   resolveOfficerComplaint,
   triggerOfficerVerificationCall,

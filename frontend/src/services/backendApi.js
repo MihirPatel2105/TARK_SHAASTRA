@@ -244,6 +244,13 @@ export function toUiComplaint(complaint) {
     createdById: complaint.created_by || null,
     citizenEmail: complaint.citizen_email || null,
     citizenPhone: complaint.citizen_phone || null,
+    ivrCallId: complaint.ivr_call_id || null,
+    ivrCallerNumber: complaint.ivr_caller_number || null,
+    ivrRecordingSid: complaint.ivr_recording_sid || null,
+    ivrRecordingUrl: complaint.ivr_recording_url || null,
+    ivrTranscriptionText: complaint.ivr_transcription_text || null,
+    ivrSummary: complaint.ivr_summary || null,
+    ivrProcessingStatus: complaint.ivr_processing_status || null,
     assignedOfficerId: complaint.assigned_officer || null,
     assignedToId: complaint.assigned_to || null,
     imageUrl: complaint.image_url || complaint.imageUrl || null,
@@ -530,6 +537,46 @@ export async function fetchOfficerComplaints(status) {
           String(complaint.status || "").toLowerCase() === String(status || "").toLowerCase()
       )
     );
+  }
+}
+
+export async function fetchOfficerIvrComplaints() {
+  const response = await apiFetch(`${API_BASE_URL}/officer/ivr-complaints`, {
+    headers: buildAuthHeaders()
+  });
+
+  try {
+    const data = await parseResponse(response);
+    return (data.complaints || []).map(toUiComplaint);
+  } catch (error) {
+    return fallbackIfServerError(
+      error,
+      loadLocalComplaints().filter((complaint) => String(complaint.source || "").toUpperCase() === "IVR_CALL")
+    );
+  }
+}
+
+export async function syncOfficerIvrComplaints() {
+  const response = await apiFetch(`${API_BASE_URL}/officer/ivr-complaints/sync`, {
+    method: "POST",
+    headers: buildAuthHeaders()
+  });
+
+  try {
+    const data = await parseResponse(response);
+    return {
+      importedCount: Number(data.importedCount || 0),
+      skippedCount: Number(data.skippedCount || 0),
+      scannedCount: Number(data.scannedCount || 0),
+      complaints: (data.complaints || []).map(toUiComplaint)
+    };
+  } catch (error) {
+    return fallbackIfServerError(error, {
+      importedCount: 0,
+      skippedCount: 0,
+      scannedCount: 0,
+      complaints: loadLocalComplaints().filter((complaint) => String(complaint.source || "").toUpperCase() === "IVR_CALL")
+    });
   }
 }
 
