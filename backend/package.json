@@ -4,8 +4,8 @@
   "description": "Complaint reporting backend with geo search, voting, and Cloudinary image uploads.",
   "main": "server.js",
   "scripts": {
-    "start": "kill-port 5000 && node server.js",
-    "dev": "kill-port 5000 && nodemon",
+    "start": "kill-port 4000 5000 && node server.js",
+    "dev": "kill-port 4000 5000 && nodemon",
     "seed:demo": "node scripts/seedDemoData.js"
   },
   "keywords": [

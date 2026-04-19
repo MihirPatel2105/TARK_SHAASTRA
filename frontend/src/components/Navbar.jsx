@@ -1,4 +1,4 @@
-import { LogOut, ShieldCheck, UserCircle2 } from "lucide-react";
+import { LogOut, PhoneCall, PlusCircle, ShieldCheck, UserCircle2 } from "lucide-react";
 import { useContext } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AppContext } from "../App";
@@ -31,6 +31,27 @@ function Navbar() {
         </button>
 
         <div className="flex items-center gap-3">
+          {user?.role === "Citizen" ? (
+            <div className="hidden border-r border-slate-300 pr-4 sm:flex sm:items-center sm:gap-3">
+              <Link
+                to="/citizen/new-complaint"
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800"
+                title="Create a new complaint"
+              >
+                <PlusCircle size={16} />
+                New Complaint
+              </Link>
+              <Link
+                to="/citizen/ivr"
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
+                title="Use IVR Call system"
+              >
+                <PhoneCall size={16} />
+                IVR Call
+              </Link>
+            </div>
+          ) : null}
+
           <Link
             to={profilePath}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
