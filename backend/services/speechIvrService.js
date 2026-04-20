@@ -5,7 +5,11 @@ function trimTrailingSlash(value) {
 }
 
 function buildCallbackUrl(complaintId) {
-  const backendBase = trimTrailingSlash(process.env.BACKEND_PUBLIC_URL || process.env.NGROK_URL);
+  const backendPublicUrl = trimTrailingSlash(process.env.BACKEND_PUBLIC_URL);
+  const ngrokUrl = trimTrailingSlash(process.env.NGROK_URL);
+  const backendBase = backendPublicUrl && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(backendPublicUrl)
+    ? backendPublicUrl
+    : ngrokUrl || backendPublicUrl;
   if (!backendBase) {
     throw new Error('BACKEND_PUBLIC_URL or NGROK_URL is required to receive IVR callbacks');
   }
@@ -16,6 +20,8 @@ function buildCallbackUrl(complaintId) {
 async function triggerResolutionVerificationCall({ complaintId, citizenPhone }) {
   const speechIvrBaseUrl = trimTrailingSlash(process.env.SPEECH_TO_TEXT_IVR_URL || 'http://localhost:3000');
   const callbackUrl = buildCallbackUrl(complaintId);
+
+  console.log('[IVR] Triggering verification call', { complaintId, callbackUrl, speechIvrBaseUrl });
 
   const response = await axios.post(
     `${speechIvrBaseUrl}/api/verification/call`,

@@ -55,7 +55,7 @@ Use the HTTPS forwarding URL in Twilio Phone Number voice webhook:
 - `POST /recording` - Download recording, STT, Gemini summary
 - `POST /api/verification/call` - Trigger outbound verification call (used by backend after officer resolution)
 - `POST /ivr/verify` - Verification IVR prompt for citizen
-- `POST /ivr/verify/response` - Captures citizen keypress (`1` resolved, `2` reopen) and calls backend callback
+- `POST /ivr/verify/response` - Captures citizen keypress (`1` resolved, `2` reopened) and calls backend callback
 - `GET /complaints` - Optional in-memory complaints list
 - `GET /health` - Health check
 
@@ -63,13 +63,16 @@ Use the HTTPS forwarding URL in Twilio Phone Number voice webhook:
 
 1. Officer uploads resolution proof in backend (`/api/officer/complaints/:id/resolve`).
 2. Backend calls `POST /api/verification/call` on this service.
-3. Twilio places call to citizen number and asks for `1` (resolved) or `2` (reopen).
+3. Twilio places call to citizen number and asks for `1` (resolved/verified) or `2` (reopened).
 4. This service posts keypress result to backend callback URL.
 5. Backend finalizes complaint state:
-	- `1` -> `VERIFIED`
-	- `2` -> `REOPENED`
+	- `1` -> `RESOLVED` / `VERIFIED`
+	- `2` -> `REOPENED` and remains visible in the reopened, upload proof, and assigned queues
 
 ## Notes
+
+- `2` means the complaint is reopened by the IVR callback and stays visible for follow-up handling.
+- The backend callback URL should point to the public tunnel URL when testing through ngrok/localtunnel.
 
 - Recording download uses Twilio basic auth (SID + Auth Token).
 - The app logs recording URL, transcription, and Gemini summary to console.

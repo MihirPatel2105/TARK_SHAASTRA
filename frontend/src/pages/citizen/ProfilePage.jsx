@@ -30,6 +30,10 @@ function ProfilePage() {
   }, [myComplaints, user?.phone]);
 
   const latest = myComplaints.slice(0, 5);
+  const fakeReports = useMemo(
+    () => myComplaints.filter((item) => item.scoring?.fakeComplaintFlag || item.status === "Failed"),
+    [myComplaints]
+  );
 
   return (
     <section className="space-y-8">
@@ -94,6 +98,48 @@ function ProfilePage() {
           )}
         </article>
       </div>
+
+      <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-xl font-semibold text-slate-900">Fake Complaint Reports</h3>
+            <p className="mt-1 text-sm text-slate-600">Reports generated when a complaint is marked fake by the officer workflow.</p>
+          </div>
+          <p className="rounded-full bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700">Email sent to citizen</p>
+        </div>
+
+        {fakeReports.length ? (
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
+            {fakeReports.map((item) => (
+              <div key={item.id} className="rounded-2xl border border-rose-200 bg-rose-50/60 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-[0.12em] text-rose-700">Complaint Report</p>
+                    <h4 className="mt-1 text-lg font-semibold text-slate-900">{item.title}</h4>
+                  </div>
+                  <p className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-rose-700">{item.status}</p>
+                </div>
+
+                <div className="mt-4 space-y-2 text-sm text-slate-700">
+                  <p><span className="font-semibold text-slate-900">Complaint ID:</span> {item.id}</p>
+                  <p><span className="font-semibold text-slate-900">Department:</span> {item.department}</p>
+                  <p><span className="font-semibold text-slate-900">District:</span> {item.district || "N/A"}</p>
+                  <p><span className="font-semibold text-slate-900">IVR Call Number:</span> {item.ivrTargetPhone || item.citizenPhone || "Not available"}</p>
+                  <p><span className="font-semibold text-slate-900">Reason:</span> {item.scoring?.scoreReason || "Marked as fake after verification"}</p>
+                  <p><span className="font-semibold text-slate-900">Citizen Points Delta:</span> {item.scoring?.citizenPointsDelta ?? 0}</p>
+                  <p><span className="font-semibold text-slate-900">Verification Status:</span> {item.verificationStatus}</p>
+                </div>
+
+                <p className="mt-4 text-xs leading-6 text-slate-500">
+                  A detailed email report has been sent to your registered email address with the officer decision and complaint evidence summary.
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-slate-500">No fake complaint reports are available yet.</p>
+        )}
+      </article>
     </section>
   );
 }

@@ -280,7 +280,10 @@ async function syncIvrCallsToComplaints() {
 }
 
 async function getImportedIvrComplaints() {
-  return Complaint.find({ source: 'IVR_CALL' })
+  return Complaint.find({
+    source: 'IVR_CALL',
+    status: { $nin: ['RESOLVED', 'VERIFIED'] }
+  })
     .sort({ created_at: -1 })
     .lean();
 }

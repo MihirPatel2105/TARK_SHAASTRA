@@ -44,11 +44,13 @@ function OfficerIvrComplaintsPage() {
   }, []);
 
   const visibleComplaints = useMemo(() => {
+    const isActiveIvrComplaint = (item) => item.status !== "Resolved" && item.status !== "Verified";
+
     if (ivrComplaints.length > 0) {
-      return ivrComplaints;
+      return ivrComplaints.filter(isActiveIvrComplaint);
     }
 
-    return complaints.filter((item) => String(item.source || "").toUpperCase() === "IVR_CALL");
+    return complaints.filter((item) => String(item.source || "").toUpperCase() === "IVR_CALL" && isActiveIvrComplaint(item));
   }, [complaints, ivrComplaints]);
 
   return (

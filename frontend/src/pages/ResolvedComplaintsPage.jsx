@@ -6,8 +6,16 @@ import VerificationIndicator from "../components/VerificationIndicator";
 function ResolvedComplaintsPage() {
   const { complaints, user } = useContext(AppContext);
   const resolved = useMemo(
-    () => complaints.filter((item) => (item.createdById === user?.id || item.citizenEmail === user?.email) && item.status === "Verified"),
-    [complaints, user?.email]
+    () => complaints.filter((item) => {
+      const belongsToCitizen =
+        item.createdById === user?.id ||
+        item.citizenEmail === user?.email ||
+        (user?.phone && item.citizenPhone === user.phone);
+
+      const isResolvedOutcome = item.status === "Resolved" || item.status === "Verified";
+      return belongsToCitizen && isResolvedOutcome;
+    }),
+    [complaints, user?.email, user?.id, user?.phone]
   );
 
   return (
@@ -32,7 +40,7 @@ function ResolvedComplaintsPage() {
 
               <div className="mt-4 grid gap-3 text-sm text-slate-700 sm:grid-cols-2">
                 <p><span className="font-semibold text-slate-900">Date:</span> {complaint.resolvedAt || complaint.createdAt}</p>
-                <p><span className="font-semibold text-slate-900">Final result:</span> Verified after citizen confirmation</p>
+                <p><span className="font-semibold text-slate-900">Final result:</span> {complaint.status === "Resolved" ? "Resolved after citizen confirmation" : "Verified after citizen confirmation"}</p>
                 <p><span className="font-semibold text-slate-900">Citizen score:</span> {complaint.scoring?.citizenPointsDelta ?? 0}</p>
                 <p><span className="font-semibold text-slate-900">Department score:</span> {complaint.scoring?.departmentPointsDelta ?? 0}</p>
               </div>

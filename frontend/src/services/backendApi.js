@@ -267,6 +267,7 @@ export function toUiComplaint(complaint) {
     createdById: complaint.created_by || null,
     citizenEmail: complaint.citizen_email || null,
     citizenPhone: complaint.citizen_phone || null,
+    ivrTargetPhone: complaint.ivr_target_phone || complaint.citizen_phone || null,
     ivrCallId: complaint.ivr_call_id || null,
     ivrCallerNumber: complaint.ivr_caller_number || null,
     ivrRecordingSid: complaint.ivr_recording_sid || null,
@@ -570,11 +571,16 @@ export async function fetchOfficerIvrComplaints() {
 
   try {
     const data = await parseResponse(response);
-    return (data.complaints || []).map(toUiComplaint);
+    return (data.complaints || [])
+      .map(toUiComplaint)
+      .filter((complaint) => complaint.status !== "Resolved" && complaint.status !== "Verified");
   } catch (error) {
     return fallbackIfServerError(
       error,
-      loadLocalComplaints().filter((complaint) => String(complaint.source || "").toUpperCase() === "IVR_CALL")
+      loadLocalComplaints().filter(
+        (complaint) =>
+          String(complaint.source || "").toUpperCase() === "IVR_CALL" && complaint.status !== "Resolved" && complaint.status !== "Verified"
+      )
     );
   }
 }
@@ -641,7 +647,7 @@ export async function resolveOfficerComplaint(complaintId, payload) {
   } catch (error) {
     return fallbackIfServerError(error, updateLocalComplaint(complaintId, (complaint) => ({
       ...complaint,
-      status: markAsFake ? "Failed" : "Resolved",
+      status: markAsFake ? "Failed" : "Pending",
       verificationStatus: markAsFake ? "Failed" : "Pending",
       verification: { ...(complaint.verification || {}), photoUploaded: true, gpsMatch: true },
       scoring: markAsFake
@@ -659,7 +665,7 @@ export async function resolveOfficerComplaint(complaintId, payload) {
             scoreReason: "OFFICER_EVIDENCE_SUBMITTED",
             fakeComplaintFlag: false
           },
-      timeline: [...(complaint.timeline || []), { label: markAsFake ? "Officer Marked Complaint Fake" : "Officer Evidence Submitted", date: new Date().toISOString().slice(0, 10) }]
+      timeline: [...(complaint.timeline || []), { label: markAsFake ? "Officer Marked Complaint Fake" : "Officer Evidence Submitted; Pending Verification", date: new Date().toISOString().slice(0, 10) }]
     })));
   }
 }

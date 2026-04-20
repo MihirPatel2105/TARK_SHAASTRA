@@ -10,25 +10,23 @@ function OfficerAssignedComplaintsPage() {
   const [error, setError] = useState("");
   const [workingId, setWorkingId] = useState(null);
   const [districtFilter, setDistrictFilter] = useState("ALL");
-  const [departmentFilter, setDepartmentFilter] = useState("ALL");
 
   const districtOptions = useMemo(
     () => Array.from(new Set(complaints.map((item) => item.district).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
     [complaints]
   );
 
-  const departmentOptions = useMemo(
-    () => Array.from(new Set(complaints.map((item) => item.department).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    [complaints]
-  );
-
   const assigned = useMemo(
     () => complaints.filter((item) => {
+      const activeWorkState = item.status === "Pending" || item.status === "In Progress";
+      if (!activeWorkState) {
+        return false;
+      }
+
       const districtPass = districtFilter === "ALL" || item.district === districtFilter;
-      const departmentPass = departmentFilter === "ALL" || item.department === departmentFilter;
-      return districtPass && departmentPass;
+      return districtPass;
     }),
-    [complaints, districtFilter, departmentFilter]
+    [complaints, districtFilter]
   );
 
   const startWork = async (complaint) => {
@@ -57,7 +55,7 @@ function OfficerAssignedComplaintsPage() {
         </div>
 
         <div className="p-6">
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-1">
             <label className="text-sm">
               <span className="mb-2 block font-semibold text-slate-800">Filter by District</span>
               <select
@@ -68,19 +66,6 @@ function OfficerAssignedComplaintsPage() {
                 <option value="ALL">All</option>
                 {districtOptions.map((district) => (
                   <option key={district} value={district}>{district}</option>
-                ))}
-              </select>
-            </label>
-            <label className="text-sm">
-              <span className="mb-2 block font-semibold text-slate-800">Filter by Department</span>
-              <select
-                value={departmentFilter}
-                onChange={(event) => setDepartmentFilter(event.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900"
-              >
-                <option value="ALL">All</option>
-                {departmentOptions.map((department) => (
-                  <option key={department} value={department}>{department}</option>
                 ))}
               </select>
             </label>

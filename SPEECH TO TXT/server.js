@@ -596,7 +596,7 @@ app.all("/ivr/verify/response", async (req, res) => {
   if (digits === "1") {
     status = "RESOLVED";
   } else if (digits === "2") {
-    status = "REOPEN";
+    status = "REOPENED";
   } else {
     status = "NO_RESPONSE";
   }
@@ -639,7 +639,7 @@ app.all("/ivr/verify/response", async (req, res) => {
     } else if (AUDIO_3_URL) {
       twiml.play(AUDIO_3_URL);
     } else {
-      twiml.say({ language: "gu-IN", voice: "alice" }, "આભાર. તમારી ફરિયાદ ફરી તપાસ માટે ખોલવામાં આવી છે.");
+      twiml.say({ language: "gu-IN", voice: "alice" }, "આભાર. તમારી ફરિયાદ ફરી ખોલવામાં આવી છે.");
     }
 
     twiml.pause({ length: POST_AUDIO_HANGUP_DELAY_SECONDS });

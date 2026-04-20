@@ -5,6 +5,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { uploadBufferToCloudinary } = require('../services/cloudinaryService');
 const { classifyImageByAllModels } = require('../services/roboflowService');
 const { triggerResolutionVerificationCall } = require('../services/speechIvrService');
+const { sendEmail } = require('../services/emailService');
 const { haversineDistanceMeters } = require('../utils/geo');
 const { extractImageGps } = require('../utils/imageGps');
 const { getImportedIvrComplaints, syncIvrCallsToComplaints } = require('../services/ivrComplaintSyncService');
@@ -320,7 +321,7 @@ function parseIvrResolutionChoice(rawValue) {
 
 function applyIvrOutcomeToComplaint(complaint, outcome) {
   if (outcome === 'RESOLVED') {
-    complaint.status = 'VERIFIED';
+    complaint.status = 'RESOLVED';
     complaint.verification_status = 'VERIFIED';
     complaint.reopen_flag = 0;
     complaint.verified_at = new Date();
@@ -334,16 +335,68 @@ function applyIvrOutcomeToComplaint(complaint, outcome) {
     return;
   }
 
-  complaint.status = 'REOPENED';
-  complaint.verification_status = 'REOPENED';
-  complaint.reopen_flag = 1;
+  if (outcome === 'REOPENED') {
+    complaint.status = 'REOPENED';
+    complaint.verification_status = 'REOPENED';
+    complaint.reopen_flag = 1;
+    complaint.resolved_at = undefined;
+    complaint.verified_at = undefined;
+    complaint.scoring = {
+      ...complaint.scoring,
+      citizen_points_delta: 0,
+      department_points_delta: -5,
+      score_reason: 'Citizen reopened the complaint through IVR',
+      fake_complaint_flag: 0
+    };
+    return;
+  }
+
+  complaint.status = 'PENDING';
+  complaint.verification_status = 'PENDING';
+  complaint.reopen_flag = 0;
+  complaint.resolved_at = undefined;
   complaint.verified_at = undefined;
   complaint.scoring = {
     ...complaint.scoring,
     citizen_points_delta: 0,
     department_points_delta: -5,
-    score_reason: 'Citizen requested complaint reopening through IVR',
+    score_reason: 'Citizen marked complaint not resolved through IVR; kept in pending workflow',
     fake_complaint_flag: 0
+  };
+}
+
+function buildFakeComplaintReport(complaint, officer, evidence) {
+  const rows = [
+    ['Complaint ID', complaint._id.toString()],
+    ['Grievance ID', complaint.grievance_id || 'N/A'],
+    ['Title', complaint.title || 'N/A'],
+    ['Department', complaint.department || 'N/A'],
+    ['District', complaint.district || 'N/A'],
+    ['Status', 'FAILED'],
+    ['Verification Status', 'FAILED'],
+    ['Reason', complaint.scoring?.score_reason || 'Officer marked complaint as fake'],
+    ['Citizen Points Delta', String(complaint.scoring?.citizen_points_delta ?? 0)],
+    ['Department Points Delta', String(complaint.scoring?.department_points_delta ?? 0)],
+    ['GPS Match', evidence.gpsMatchFlag ? 'Yes' : 'No'],
+    ['Photo Uploaded', evidence.photoUploaded ? 'Yes' : 'No'],
+    ['Officer', officer?.name || officer?.email || 'Unknown officer']
+  ];
+
+  return {
+    subject: `Fake complaint report for ${complaint.title || complaint.grievance_id || complaint._id.toString()}`,
+    text: rows.map(([label, value]) => `${label}: ${value}`).join('\n'),
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#0f172a">
+        <h2 style="margin:0 0 12px">Complaint marked fake</h2>
+        <p>Your complaint was reviewed and marked as fake by the officer team. The full report is below.</p>
+        <table cellpadding="8" cellspacing="0" style="border-collapse:collapse;border:1px solid #cbd5e1;min-width:360px">
+          <tbody>
+            ${rows.map(([label, value]) => `<tr><td style="border:1px solid #cbd5e1;font-weight:600;background:#f8fafc">${label}</td><td style="border:1px solid #cbd5e1">${value}</td></tr>`).join('')}
+          </tbody>
+        </table>
+        <p style="margin-top:16px">If you believe this decision is incorrect, contact the grievance office with the Complaint ID above.</p>
+      </div>
+    `
   };
 }
 
@@ -806,11 +859,6 @@ const resolveComplaint = asyncHandler(async (req, res) => {
 });
 
 const getOfficerComplaints = asyncHandler(async (req, res) => {
-  if (!req.user.department) {
-    res.status(400);
-    throw new Error('Officer department is required on user profile');
-  }
-
   const query = {};
 
   if (req.query.status) {
@@ -833,20 +881,10 @@ const getOfficerComplaints = asyncHandler(async (req, res) => {
 });
 
 const startComplaintWork = asyncHandler(async (req, res) => {
-  if (!req.user.department) {
-    res.status(400);
-    throw new Error('Officer department is required on user profile');
-  }
-
   const complaint = await Complaint.findById(req.params.id);
   if (!complaint) {
     res.status(404);
     throw new Error('Complaint not found');
-  }
-
-  if (normalizeDepartment(complaint.department) !== normalizeDepartment(req.user.department)) {
-    res.status(403);
-    throw new Error('You can only start complaints in your department');
   }
 
   if (complaint.status !== 'PENDING') {
@@ -866,11 +904,6 @@ const startComplaintWork = asyncHandler(async (req, res) => {
 });
 
 const resolveOfficerComplaint = asyncHandler(async (req, res) => {
-  if (!req.user.department) {
-    res.status(400);
-    throw new Error('Officer department is required on user profile');
-  }
-
   const complaint = await Complaint.findById(req.params.id);
   if (!complaint) {
     res.status(404);
@@ -922,7 +955,7 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
     citizenPhone = String(citizenUserByEmail?.phone || '').trim();
   }
 
-  complaint.status = markAsFake ? 'FAILED' : 'RESOLVED';
+  complaint.status = markAsFake ? 'FAILED' : 'PENDING';
   complaint.assigned_to = req.user._id;
   complaint.assigned_officer = req.user._id;
   complaint.resolved_image = uploadResult.secure_url;
@@ -935,7 +968,7 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
   complaint.verification_status = markAsFake ? 'FAILED' : 'PENDING';
   complaint.reopen_flag = 0;
   complaint.resolved_at = new Date();
-  complaint.verified_at = markAsFake ? undefined : complaint.verified_at;
+  complaint.verified_at = undefined;
 
   if (!complaint.scoring) {
     complaint.scoring = {
@@ -955,6 +988,25 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
 
   await complaint.save();
 
+  if (markAsFake) {
+    const recipientEmail = String(complaint.citizen_email || '').trim();
+    if (recipientEmail) {
+      try {
+        const fakeComplaintReport = buildFakeComplaintReport(complaint, req.user, {
+          gpsMatchFlag,
+          photoUploaded: Number(complaint.photo_uploaded) === 1
+        });
+
+        await sendEmail({
+          to: recipientEmail,
+          ...fakeComplaintReport
+        });
+      } catch (error) {
+        console.error('[EMAIL] Unable to send fake complaint report:', error.message);
+      }
+    }
+  }
+
   await User.findByIdAndUpdate(req.user._id, {
     location: {
       type: 'Point',
@@ -973,8 +1025,6 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
   if (markAsFake) {
     ivrTrigger.reason = 'Complaint marked as fake, IVR call skipped';
     await applyUserPointUpdatesForFakeComplaint(complaint);
-  } else if (!citizenPhone) {
-    ivrTrigger.reason = 'Demo IVR phone is unavailable, so IVR call was skipped';
   } else {
     ivrTrigger.attempted = true;
     try {
@@ -985,17 +1035,10 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
 
       ivrTrigger.triggered = true;
       ivrTrigger.callSid = ivrResponse.callSid || null;
-      ivrTrigger.reason = ivrResponse.message || 'IVR call triggered to demo number';
+      ivrTrigger.reason = ivrResponse.message || 'IVR call triggered after evidence submission';
 
       if (ivrResponse?.fallbackMode) {
-        applyIvrOutcomeToComplaint(complaint, 'RESOLVED');
-        complaint.scoring = {
-          ...complaint.scoring,
-          score_reason: 'AUTO_VERIFIED_FALLBACK_CALL'
-        };
-        await complaint.save();
-        await applyUserPointUpdatesForIvrOutcome(complaint, 'RESOLVED');
-        ivrTrigger.reason = `${ivrTrigger.reason} Complaint auto-verified in fallback mode.`;
+        ivrTrigger.reason = `${ivrTrigger.reason} Fallback mode active; complaint remains pending until explicit IVR response.`;
       }
     } catch (error) {
       ivrTrigger.error = error.response?.data?.message || error.message;
@@ -1004,7 +1047,7 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
   }
 
   res.json({
-    message: markAsFake ? 'Complaint marked as fake by officer' : 'Complaint resolved by officer',
+    message: markAsFake ? 'Complaint marked as fake by officer' : 'Complaint moved to pending verification',
     gps_match_flag: gpsMatchFlag,
     distance_meters: {
       officer_to_complaint: Math.round(officerToComplaintMeters),
@@ -1017,11 +1060,6 @@ const resolveOfficerComplaint = asyncHandler(async (req, res) => {
 });
 
 const triggerOfficerVerificationCall = asyncHandler(async (req, res) => {
-  if (!req.user.department) {
-    res.status(400);
-    throw new Error('Officer department is required on user profile');
-  }
-
   const complaint = await Complaint.findById(req.params.id);
   if (!complaint) {
     res.status(404);
@@ -1065,14 +1103,7 @@ const triggerOfficerVerificationCall = asyncHandler(async (req, res) => {
       ivrTrigger.reason = ivrResponse.message || 'IVR call triggered to demo number';
 
       if (ivrResponse?.fallbackMode) {
-        applyIvrOutcomeToComplaint(complaint, 'RESOLVED');
-        complaint.scoring = {
-          ...complaint.scoring,
-          score_reason: 'AUTO_VERIFIED_FALLBACK_CALL'
-        };
-        await complaint.save();
-        await applyUserPointUpdatesForIvrOutcome(complaint, 'RESOLVED');
-        ivrTrigger.reason = `${ivrTrigger.reason} Complaint auto-verified in fallback mode.`;
+        ivrTrigger.reason = `${ivrTrigger.reason} Fallback mode active; complaint remains pending until explicit IVR response.`;
       }
     } catch (error) {
       ivrTrigger.error = error.response?.data?.message || error.message;
@@ -1107,8 +1138,15 @@ const ingestIvrVerificationResponse = asyncHandler(async (req, res) => {
   const outcome = parseIvrResolutionChoice(req.body.ivrResponse || req.body.response || req.body.Digits || req.query.Digits);
   if (!outcome) {
     res.status(400);
-    throw new Error('IVR response must be 1/2 or equivalent resolved/reopened values');
+    throw new Error('IVR response must be 1/2 or equivalent resolved/not-resolved values');
   }
+
+  console.log('[IVR] Callback received', {
+    complaintId: complaint._id.toString(),
+    ivrResponse: req.body.ivrResponse || req.body.response || req.body.Digits || req.query.Digits || null,
+    callSid: req.body.CallSid || req.query.CallSid || null,
+    outcome
+  });
 
   if (complaint.verification_status !== 'PENDING') {
     res.status(409);
@@ -1308,11 +1346,6 @@ const predictComplaintDetails = asyncHandler(async (req, res) => {
 });
 
 const getOfficerIvrComplaints = asyncHandler(async (req, res) => {
-  if (!req.user.department) {
-    res.status(400);
-    throw new Error('Officer department is required on user profile');
-  }
-
   const complaints = await getImportedIvrComplaints();
 
   res.json({
@@ -1327,11 +1360,6 @@ const getOfficerIvrComplaints = asyncHandler(async (req, res) => {
 });
 
 const syncIvrComplaints = asyncHandler(async (req, res) => {
-  if (!req.user.department) {
-    res.status(400);
-    throw new Error('Officer department is required on user profile');
-  }
-
   const result = await syncIvrCallsToComplaints();
 
   res.json({

@@ -5,7 +5,6 @@ import { triggerOfficerVerificationCall } from "../../services/backendApi";
 
 function OfficerPendingVerificationsPage() {
   const { complaints, user } = useContext(AppContext);
-  const [departmentFilter, setDepartmentFilter] = useState("ALL");
   const [triggeringId, setTriggeringId] = useState(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -18,16 +17,12 @@ function OfficerPendingVerificationsPage() {
   };
 
   const pending = useMemo(
-    () => complaints.filter((item) => (item.assignedOfficerId === user?.id || item.assignedToId === user?.id) && (item.status === "Pending" || item.status === "Resolved" || item.status === "In Progress")),
+    () => complaints.filter((item) => {
+      const belongsToOfficer = item.assignedOfficerId === user?.id || item.assignedToId === user?.id;
+      const isPendingVerification = item.status === "Pending" && item.verificationStatus === "Pending";
+      return belongsToOfficer && isPendingVerification;
+    }),
     [complaints, user?.id]
-  );
-  const departmentOptions = useMemo(
-    () => Array.from(new Set(pending.map((item) => item.department).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    [pending]
-  );
-  const visiblePending = useMemo(
-    () => pending.filter((item) => departmentFilter === "ALL" || item.department === departmentFilter),
-    [pending, departmentFilter]
   );
 
   const triggerIvr = async (complaintId) => {
@@ -53,18 +48,8 @@ function OfficerPendingVerificationsPage() {
         <p className="mt-2 text-sm leading-7 text-slate-600">Complaints waiting for verification signals from IVR, GPS, and photo proof.</p>
       </div>
 
-      <div className="max-w-xs">
-        <label className="text-sm">
-          <span className="mb-2 block font-semibold text-slate-700">Department</span>
-          <select value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-slate-900">
-            <option value="ALL">All Departments</option>
-            {departmentOptions.map((department) => <option key={department} value={department}>{department}</option>)}
-          </select>
-        </label>
-      </div>
-
       <div className="grid gap-4">
-        {visiblePending.map((complaint) => (
+        {pending.map((complaint) => (
           <article key={complaint.id} className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-card">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -95,7 +80,7 @@ function OfficerPendingVerificationsPage() {
 
       {message ? <p className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</p> : null}
       {error ? <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
-      {!visiblePending.length ? <p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">No pending verification complaints for the selected department.</p> : null}
+      {!pending.length ? <p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">No pending verification complaints found.</p> : null}
     </section>
   );
 }

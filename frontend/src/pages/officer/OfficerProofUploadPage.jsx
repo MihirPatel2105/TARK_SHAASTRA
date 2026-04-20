@@ -5,45 +5,34 @@ import { resolveOfficerComplaint } from "../../services/backendApi";
 
 function OfficerProofUploadPage() {
   const { complaints, refreshComplaints } = useContext(AppContext);
-  const [departmentFilter, setDepartmentFilter] = useState("ALL");
   const officerCases = useMemo(
     () =>
-      complaints.filter((item) => item.status === "Pending" || item.status === "In Progress" || item.status === "Reopened"),
+      complaints.filter(
+        (item) => item.status === "Pending" || item.status === "In Progress" || item.status === "Reopened" || item.status === "Failed"
+      ),
     [complaints]
-  );
-  const ivrCases = useMemo(
-    () => officerCases.filter((item) => String(item.source || "").toUpperCase() === "IVR_CALL"),
-    [officerCases]
-  );
-  const departmentOptions = useMemo(
-    () => Array.from(new Set(officerCases.map((item) => item.department).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
-    [officerCases]
-  );
-  const filteredCases = useMemo(
-    () => officerCases.filter((item) => departmentFilter === "ALL" || item.department === departmentFilter),
-    [officerCases, departmentFilter]
   );
   const [complaintId, setComplaintId] = useState("");
   const [photo, setPhoto] = useState(null);
   const [gps, setGps] = useState("");
   const [message, setMessage] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeAction, setActiveAction] = useState(null);
 
   useEffect(() => {
-    if (!filteredCases.length) {
+    if (!officerCases.length) {
       setComplaintId("");
       return;
     }
 
     setComplaintId((previousId) => {
-      const stillExists = filteredCases.some((item) => item.id === previousId);
-      return stillExists ? previousId : filteredCases[0].id;
+      const stillExists = officerCases.some((item) => item.id === previousId);
+      return stillExists ? previousId : officerCases[0].id;
     });
-  }, [filteredCases]);
+  }, [officerCases]);
 
   const selectedComplaint = useMemo(
-    () => filteredCases.find((item) => item.id === complaintId) || null,
-    [filteredCases, complaintId]
+    () => officerCases.find((item) => item.id === complaintId) || null,
+    [officerCases, complaintId]
   );
 
   const submit = async (markAsFake = false) => {
@@ -61,7 +50,7 @@ function OfficerProofUploadPage() {
       return;
     }
 
-    setIsSubmitting(true);
+    setActiveAction(markAsFake ? "fake" : "evidence");
 
     try {
       await resolveOfficerComplaint(complaintId, {
@@ -72,14 +61,25 @@ function OfficerProofUploadPage() {
         citizen_phone: selectedComplaint?.citizenPhone || undefined
       });
       await refreshComplaints();
-      setMessage(markAsFake ? "Complaint marked as fake. Citizen points reduced." : "Evidence submitted. Complaint moved to Pending Verification and IVR call triggered immediately to demo number.");
+      setMessage(markAsFake ? "Complaint marked as fake. Citizen points reduced." : "Evidence submitted. Complaint moved to Pending Verification and IVR was triggered.");
       setPhoto(null);
       setGps("");
     } catch (error) {
       setMessage(error.message || "Unable to submit evidence.");
     } finally {
-      setIsSubmitting(false);
+      setActiveAction(null);
     }
+  };
+
+  const submitEvidence = () => submit(false);
+
+  const submitFakeComplaint = async () => {
+    const confirmed = window.confirm("Mark this complaint as fake? This will reduce citizen points and cannot be undone from this screen.");
+    if (!confirmed) {
+      return;
+    }
+
+    await submit(true);
   };
 
   const captureGps = () => {
@@ -102,38 +102,25 @@ function OfficerProofUploadPage() {
       </div>
 
       <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-card">
-        {ivrCases.length ? (
-          <p className="mb-4 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-            {ivrCases.length} IVR complaint(s) are available in this queue.
-          </p>
-        ) : null}
         {!officerCases.length ? (
           <p className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-            No complaints are available in your officer queue for proof upload.
+            No complaints are available for proof upload right now.
           </p>
         ) : null}
 
         <div className="grid gap-4 md:grid-cols-3">
           <select
-            value={departmentFilter}
-            onChange={(event) => setDepartmentFilter(event.target.value)}
-            className="rounded-2xl border border-slate-300 px-4 py-3 text-slate-900"
-          >
-            <option value="ALL">All Departments</option>
-            {departmentOptions.map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
-          <select
             value={complaintId}
             onChange={(event) => setComplaintId(event.target.value)}
-            disabled={!filteredCases.length}
+            disabled={!officerCases.length}
             className="rounded-2xl border border-slate-300 px-4 py-3 text-slate-900 disabled:cursor-not-allowed disabled:bg-slate-100"
           >
-            {filteredCases.map((item) => <option key={item.id} value={item.id}>{item.id} - {item.title}</option>)}
+            {officerCases.map((item) => <option key={item.id} value={item.id}>{item.id} - {item.title}</option>)}
           </select>
 
           <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
             <UploadCloud size={16} />
-              <input type="file" accept="image/*" className="hidden" disabled={!filteredCases.length} onChange={(event) => setPhoto(event.target.files?.[0] || null)} />
+              <input type="file" accept="image/*" className="hidden" disabled={!officerCases.length} onChange={(event) => setPhoto(event.target.files?.[0] || null)} />
             {photo ? photo.name : "Upload photo proof"}
           </label>
         </div>
@@ -156,22 +143,22 @@ function OfficerProofUploadPage() {
 
         <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
           <input value={gps} readOnly placeholder="GPS location" className="rounded-2xl border border-slate-300 px-4 py-3 text-slate-900" />
-          <button type="button" onClick={captureGps} disabled={!filteredCases.length} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50">
+          <button type="button" onClick={captureGps} disabled={!officerCases.length} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50">
             <LocateFixed size={16} /> Capture GPS
           </button>
         </div>
 
         <div className="mt-4 flex flex-wrap gap-3">
-          <button type="button" onClick={() => submit(false)} disabled={isSubmitting || !filteredCases.length} className="rounded-2xl bg-emerald-700 px-5 py-3 font-semibold text-white shadow-lg shadow-emerald-700/20 disabled:cursor-not-allowed disabled:opacity-60">
-            {isSubmitting ? "Submitting..." : "Submit Evidence"}
+          <button type="button" onClick={submitEvidence} disabled={activeAction !== null || !officerCases.length} className="rounded-2xl bg-emerald-700 px-5 py-3 font-semibold text-white shadow-lg shadow-emerald-700/20 disabled:cursor-not-allowed disabled:opacity-60">
+            {activeAction === "evidence" ? "Submitting..." : "Submit Evidence"}
           </button>
-          <button type="button" onClick={() => submit(true)} disabled={isSubmitting || !filteredCases.length} className="rounded-2xl bg-rose-700 px-5 py-3 font-semibold text-white shadow-lg shadow-rose-700/20 disabled:cursor-not-allowed disabled:opacity-60">
-            {isSubmitting ? "Submitting..." : "Mark Fake Complaint"}
+          <button type="button" onClick={submitFakeComplaint} disabled={activeAction !== null || !officerCases.length} className="rounded-2xl bg-rose-700 px-5 py-3 font-semibold text-white shadow-lg shadow-rose-700/20 disabled:cursor-not-allowed disabled:opacity-60">
+            {activeAction === "fake" ? "Submitting..." : "Mark Fake Complaint"}
           </button>
         </div>
 
         {message ? <p className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">{message}</p> : null}
-        <p className="mt-4 text-sm text-slate-500">Photo proof is mandatory for both actions. Submit Evidence sends the case to Pending Verification; Mark Fake Complaint deducts citizen points and finalizes it as failed.</p>
+        <p className="mt-4 text-sm text-slate-500">Photo proof is mandatory for both actions. Submit Evidence moves the case to Pending Verification and triggers IVR; Mark Fake Complaint deducts citizen points and finalizes it as failed.</p>
       </div>
     </section>
   );
